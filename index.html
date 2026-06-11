@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>מלווים — מעקב תשלומים</title>
+<link rel="manifest" href="manifest.json"/>
+<link rel="apple-touch-icon" href="icon.jpg"/>
+<meta name="theme-color" content="#2563eb"/>
+<script>
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').then(reg=>{
+    reg.addEventListener('updatefound',()=>{
+      const w=reg.installing;
+      w.addEventListener('statechange',()=>{
+        if(w.state==='activated') window.location.reload();
+      });
+    });
+  });
+}
+</script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<style>
+* { box-sizing:border-box; margin:0; padding:0; }
+body { background:#f1f5f9; font-family:'Segoe UI',Arial,sans-serif; direction:rtl; }
+input,select,button { font-family:inherit; }
+@keyframes spin { to { transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const firebaseConfig = {
+  apiKey:"AIzaSyCtTCUNeYzRMlSLe2VJs_ols818QI1ZuTA",
+  authDomain:"sarikow-3342b.firebaseapp.com",
+  databaseURL:"https://sarikow-3342b-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:"sarikow-3342b",
+  storageBucket:"sarikow-3342b.firebasestorage.app",
+  messagingSenderId:"95850039076",
+  appId:"1:95850039076:web:4149b5724c52fbdaa315b1"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+</script>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+// ── CONSTANTS ────────────────────────────────────────────────
+const MONTHS_HE = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"];
+const fmt = n => Number(n||0).toLocaleString("he-IL",{minimumFractionDigits:0,maximumFractionDigits:0});
+const now = new Date();
+const mkMonthKey = (y,m) => `${y}-${String(m+1).padStart(2,'0')}`;
+const mkMonthLabel = (y,m) => `${MONTHS_HE[m]} ${y}`;
+const labelFromKey = k => { const [y,m]=k.split("-").map(Number); return mkMonthLabel(y,m-1); };
+const fmtDateTime = ts => new Date(ts).toLocaleString("he-IL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+
+// ── FIREBASE HELPERS ─────────────────────────────────────────
+function fbSet(path,val){ db.ref(path).set(val); }
+function fbListen(path,cb){
+  const ref=db.ref(path);
+  ref.on("value",snap=>cb(snap.val()));
+  return ()=>ref.off("value");
+}
+
+// ── MAIN APP ─────────────────────────────────────────────────
+function App(){
+  const [ready,setReady]   = useState(false);
+  const [tab,setTab]       = useState("shmulik");
+  const [syncing,setSyncing] = useState(false);
+  const [shmulik,setShmulik] = useState({});
+  const [engel,setEngel]     = useState({});
+
+  useEffect(()=>{
+    let loaded={sh:false,en:false};
+    const check=()=>{ if(loaded.sh&&loaded.en) setReady(true); };
+    const u1=fbListen("melavim/shmulik/months",v=>{ setShmulik(v||{}); loaded.sh=true; check(); });
+    const u2=fbListen("melavim/engel/months",   v=>{ setEngel(v||{});   loaded.en=true; check(); });
+    return ()=>{u1();u2();};
+  },[]);
+
+  const sync = fn => { setSyncing(true); fn(); setTimeout(()=>setSyncing(false),900); };
+
+  const selKey   = mkMonthKey(now.getFullYear(),now.getMonth());
+  const selLabel = mkMonthLabel(now.getFullYear(),now.getMonth());
+
+  const tabS = t => ({padding:"9px 14px",borderRadius:8,border:tab===t?"2px solid #1e3a5f":"2px solid #e2e8f0",background:tab===t?"#1e3a5f":"#f8fafc",cursor:"pointer",fontWeight:600,fontSize:13,color:tab===t?"#fff":"#64748b"});
+
+  if(!ready) return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:16,color:"#475569"}}>
+      <div style={{fontSize:32,fontWeight:800,color:"#1e3a5f"}}>מלווים</div>
+      <div style={{fontSize:14,opacity:.7}}>מתחבר לענן...</div>
+      <div style={{width:40,height:40,border:"4px solid #e2e8f0",borderTop:"4px solid #2563eb",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+    </div>
+  );
+
+  return (
+    <div style={{minHeight:"100vh",background:"#f1f5f9"}}>
+      <header style={{background:"#fff",boxShadow:"0 2px 8px rgba(0,0,0,0.08)",position:"sticky",top:0,zIndex:100}}>
+        <div style={{maxWidth:520,margin:"0 auto",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+          <div>
+            <div style={{fontSize:20,fontWeight:800,color:"#1e3a5f"}}>מלווים</div>
+            <div style={{fontSize:10,color:"#94a3b8",display:"flex",alignItems:"center",gap:4}}>
+              מעקב תשלומים
+              <span style={{width:6,height:6,borderRadius:"50%",background:syncing?"#f59e0b":"#22c55e",display:"inline-block"}}/>
+              <span>{syncing?"שומר...":"מסונכרן ☁️"}</span>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={()=>setTab("shmulik")} style={tabS("shmulik")}>👤 שמוליק</button>
+            <button onClick={()=>setTab("engel")}   style={tabS("engel")}>👥 אנגל</button>
+          </div>
+        </div>
+      </header>
+
+      <main style={{maxWidth:520,margin:"0 auto",padding:"12px 14px"}}>
+        {tab==="shmulik" && <ShmulikTab data={shmulik} selKey={selKey} selLabel={selLabel} sync={sync}/>}
+        {tab==="engel"   && <EngelTab   data={engel}   selKey={selKey} selLabel={selLabel} sync={sync}/>}
+      </main>
+    </div>
+  );
+}
+
+// ── SHMULIK TAB ────────────────────────────────────────────────
+function ShmulikTab({ data, selKey, selLabel, sync }){
+  const cur   = data[selKey] || {clicks:0};
+  const clicks= cur.clicks||0;
+  const total = clicks*20;
+
+  const addClick = () => sync(()=>fbSet(`melavim/shmulik/months/${selKey}/clicks`, clicks+1));
+  const undoClick = () => { if(clicks>0) sync(()=>fbSet(`melavim/shmulik/months/${selKey}/clicks`, clicks-1)); };
+
+  const months = Object.keys(data).filter(k=>k!==selKey).sort().reverse();
+
+  return (
+    <div style={col}>
+      <div style={bigCard}>
+        <div style={{fontSize:13,opacity:.75,marginBottom:4}}>{selLabel} — לתת לשמוליק</div>
+        <div style={{fontSize:42,fontWeight:800}}>{fmt(total)} ₪</div>
+        <div style={{fontSize:12,opacity:.7,marginTop:4}}>{clicks} × 20 ₪</div>
+      </div>
+
+      <button style={bigBtn} onClick={addClick}>➕ 20 ₪ לשמוליק</button>
+      <button style={{...smallBtn,opacity:clicks>0?1:0.5}} disabled={!clicks} onClick={undoClick}>↩ בטל לחיצה אחרונה</button>
+
+      <div style={card}>
+        <div style={{fontWeight:700,fontSize:14,marginBottom:10}}>📂 סיכום חודשים קודמים</div>
+        {months.length===0
+          ? <div style={empty}>אין עדיין נתונים מחודשים קודמים</div>
+          : <table style={tbl}>
+              <thead><tr><th style={th}>חודש</th><th style={th}>לחיצות</th><th style={th}>סה״כ</th></tr></thead>
+              <tbody>
+                {months.map(k=>{
+                  const c=data[k]?.clicks||0;
+                  return (
+                    <tr key={k} style={{borderBottom:"1px solid #f1f5f9"}}>
+                      <td style={td}>{labelFromKey(k)}</td>
+                      <td style={td}>{c}</td>
+                      <td style={{...td,fontWeight:700}}>{fmt(c*20)} ₪</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+        }
+      </div>
+    </div>
+  );
+}
+
+// ── ENGEL TAB ──────────────────────────────────────────────────
+function PersonCard({ title, color, amount, person, monthData, selKey, sync }){
+  const d = monthData[person] || {balance:0, log:[]};
+  const balance = d.balance||0;
+  const log = d.log||[];
+  const [partial,setPartial]=useState("");
+
+  const addClick = () => {
+    const newLog=[...log,{ts:Date.now(),amount}];
+    sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}`, {balance:balance+amount, log:newLog}));
+  };
+  const undoClick = () => {
+    if(!log.length) return;
+    const last=log[log.length-1];
+    const newLog=log.slice(0,-1);
+    sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}`, {balance:Math.max(0,balance-last.amount), log:newLog}));
+  };
+  const fullPay = () => sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}/balance`, 0));
+  const partialPay = () => {
+    const v=Number(partial)||0;
+    if(v>0) sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}/balance`, Math.max(0,balance-v)));
+    setPartial("");
+  };
+
+  return (
+    <div style={{...card,borderRight:`4px solid ${color}`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <span style={{fontWeight:700,fontSize:15}}>{title}</span>
+        <span style={{fontSize:20,fontWeight:800,color}}>{fmt(balance)} ₪</span>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:8}}>
+        <button style={{...bigBtn,flex:1,background:color}} onClick={addClick}>➕ {amount} ₪</button>
+        <button style={{...smallBtn,opacity:log.length?1:0.5}} disabled={!log.length} onClick={undoClick}>↩ בטל</button>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:8}}>
+        <button style={{...smallBtn,flex:1,opacity:balance>0?1:0.5,background:"#f0fdf4",color:"#16a34a",border:"1px solid #86efac"}} disabled={!balance} onClick={fullPay}>💰 תשלום מלא</button>
+      </div>
+      <div style={{display:"flex",gap:8}}>
+        <input style={{...iinp,flex:1}} type="number" placeholder="כמה קיבלתי (תשלום חלקי)" value={partial} onChange={e=>setPartial(e.target.value)} />
+        <button style={smallBtn} onClick={partialPay}>שלם חלקי</button>
+      </div>
+      {log.length>0 && (
+        <div style={{marginTop:10,maxHeight:120,overflowY:"auto",fontSize:11,color:"#64748b"}}>
+          {log.slice().reverse().map((l,i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderBottom:"1px solid #f1f5f9"}}>
+              <span>{fmtDateTime(l.ts)}</span><span>+{fmt(l.amount)} ₪</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EngelTab({ data, selKey, selLabel, sync }){
+  const cur = data[selKey] || {};
+  const shalom = cur.shalom || {balance:0,log:[]};
+  const zamba  = cur.zamba  || {balance:0,log:[]};
+  const combined = (shalom.balance||0)+(zamba.balance||0);
+
+  return (
+    <div style={col}>
+      <div style={bigCard}>
+        <div style={{fontSize:13,opacity:.75,marginBottom:4}}>{selLabel} — לשלוח לאנגל</div>
+        <div style={{fontSize:42,fontWeight:800}}>{fmt(combined)} ₪</div>
+        <div style={{display:"flex",gap:7,marginTop:10,flexWrap:"wrap"}}>
+          <Chip label="שלום" val={fmt(shalom.balance||0)+" ₪"} />
+          <Chip label="זמבא" val={fmt(zamba.balance||0)+" ₪"} />
+        </div>
+      </div>
+
+      <PersonCard title="שלום" color="#2563eb" amount={100} person="shalom" monthData={cur} selKey={selKey} sync={sync} />
+      <PersonCard title="זמבא" color="#7c3aed" amount={80}  person="zamba"  monthData={cur} selKey={selKey} sync={sync} />
+    </div>
+  );
+}
+
+// ── SMALL UI HELPERS ─────────────────────────────────────────
+function Chip({label,val}){
+  return <div style={{background:"rgba(255,255,255,0.14)",borderRadius:8,padding:"4px 10px",fontSize:12,display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
+    <span style={{opacity:.7,fontSize:10}}>{label}</span><span style={{fontWeight:700}}>{val}</span>
+  </div>;
+}
+
+// ── STYLES ─────────────────────────────────────────────────────
+const col      = {display:"flex",flexDirection:"column",gap:12};
+const card     = {background:"#fff",borderRadius:12,padding:"14px 16px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"};
+const bigCard  = {background:"linear-gradient(135deg,#0f2044,#1d4ed8)",borderRadius:12,padding:"14px 16px",color:"#fff",boxShadow:"0 2px 8px rgba(0,0,0,0.15)"};
+const bigBtn   = {padding:"14px 18px",background:"#2563eb",color:"#fff",border:"none",borderRadius:10,cursor:"pointer",fontWeight:700,fontSize:16};
+const smallBtn = {padding:"8px 12px",borderRadius:8,background:"#f1f5f9",border:"1px solid #e2e8f0",cursor:"pointer",fontSize:12,fontWeight:600};
+const iinp     = {border:"1px solid #e2e8f0",borderRadius:6,padding:"6px 8px",fontSize:13};
+const empty    = {textAlign:"center",color:"#94a3b8",fontSize:13,padding:"10px 0"};
+const tbl      = {width:"100%",borderCollapse:"collapse",fontSize:13};
+const th       = {textAlign:"right",padding:"6px 4px",color:"#64748b",fontSize:11,borderBottom:"2px solid #e2e8f0"};
+const td       = {padding:"6px 4px",color:"#1e293b"};
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
