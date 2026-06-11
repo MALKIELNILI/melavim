@@ -58,6 +58,11 @@ const mkMonthKey = (y,m) => `${y}-${String(m+1).padStart(2,'0')}`;
 const mkMonthLabel = (y,m) => `${MONTHS_HE[m]} ${y}`;
 const labelFromKey = k => { const [y,m]=k.split("-").map(Number); return mkMonthLabel(y,m-1); };
 const fmtDateTime = ts => new Date(ts).toLocaleString("he-IL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+const nowLocalInput = () => {
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
 
 // ── FIREBASE HELPERS ─────────────────────────────────────────
 function fbSet(path,val){ db.ref(path).set(val); }
@@ -127,14 +132,33 @@ function App(){
 
 // ── SHMULIK TAB ────────────────────────────────────────────────
 function ShmulikTab({ data, selKey, selLabel, sync }){
-  const cur   = data[selKey] || {clicks:0};
-  const clicks= cur.clicks||0;
+  const cur   = data[selKey] || {};
+  const log   = cur.log || [];
+  const clicks= cur.log ? cur.log.length : (cur.clicks||0);
   const total = clicks*20;
+  const [chargeTime,setChargeTime] = useState(nowLocalInput());
 
-  const addClick = () => sync(()=>fbSet(`melavim/shmulik/months/${selKey}/clicks`, clicks+1));
-  const undoClick = () => { if(clicks>0) sync(()=>fbSet(`melavim/shmulik/months/${selKey}/clicks`, clicks-1)); };
+  const addCharge = () => {
+    const d = chargeTime ? new Date(chargeTime) : new Date();
+    const ts = d.getTime();
+    const targetKey = mkMonthKey(d.getFullYear(),d.getMonth());
+    const tcur = data[targetKey] || {};
+    const tlog = (tcur.log||[]).concat([{ts}]).sort((a,b)=>a.ts-b.ts);
+    sync(()=>fbSet(`melavim/shmulik/months/${targetKey}`, {...tcur, log:tlog, clicks:tlog.length}));
+    setChargeTime(nowLocalInput());
+  };
+  const undoClick = () => {
+    if(!log.length) return;
+    const newLog = log.slice(0,-1);
+    sync(()=>fbSet(`melavim/shmulik/months/${selKey}`, {...cur, log:newLog, clicks:newLog.length}));
+  };
+  const removeEntry = (i) => {
+    const newLog = log.filter((_,idx)=>idx!==i);
+    sync(()=>fbSet(`melavim/shmulik/months/${selKey}`, {...cur, log:newLog, clicks:newLog.length}));
+  };
 
   const months = Object.keys(data).filter(k=>k!==selKey).sort().reverse();
+  const countFor = k => { const m=data[k]; return m?.log?m.log.length:(m?.clicks||0); };
 
   return (
     <div style={col}>
@@ -144,18 +168,42 @@ function ShmulikTab({ data, selKey, selLabel, sync }){
         <div style={{fontSize:12,opacity:.7,marginTop:4}}>{clicks} × 20 ₪</div>
       </div>
 
-      <button style={bigBtn} onClick={addClick}>➕ 20 ₪ לשמוליק</button>
-      <button style={{...smallBtn,opacity:clicks>0?1:0.5}} disabled={!clicks} onClick={undoClick}>↩ בטל לחיצה אחרונה</button>
+      <div style={{display:"flex",gap:8}}>
+        <input style={{...iinp,flex:1}} type="datetime-local" value={chargeTime} onChange={e=>setChargeTime(e.target.value)} />
+        <button style={{...bigBtn,flex:"0 0 auto"}} onClick={addCharge}>➕ 20 ₪</button>
+      </div>
+      <div style={{fontSize:11,color:"#94a3b8"}}>אפשר לשנות את התאריך כדי לרשום חיוב קודם — הוא יתווסף לחודש המתאים</div>
+      <button style={{...smallBtn,opacity:clicks>0?1:0.5}} disabled={!clicks} onClick={undoClick}>↩ בטל חיוב אחרון</button>
+
+      {log.length>0 && (
+        <div style={card}>
+          <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>📋 חיובים — {selLabel}</div>
+          <div style={{maxHeight:160,overflowY:"auto"}}>
+            {log.slice().reverse().map((l,i)=>{
+              const idx=log.length-1-i;
+              return (
+                <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:"#64748b",padding:"4px 0",borderBottom:"1px solid #f1f5f9"}}>
+                  <span>{fmtDateTime(l.ts)}</span>
+                  <span style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span>20 ₪</span>
+                    <button style={delBtn} onClick={()=>removeEntry(idx)}>✕</button>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div style={card}>
         <div style={{fontWeight:700,fontSize:14,marginBottom:10}}>📂 סיכום חודשים קודמים</div>
         {months.length===0
           ? <div style={empty}>אין עדיין נתונים מחודשים קודמים</div>
           : <table style={tbl}>
-              <thead><tr><th style={th}>חודש</th><th style={th}>לחיצות</th><th style={th}>סה״כ</th></tr></thead>
+              <thead><tr><th style={th}>חודש</th><th style={th}>חיובים</th><th style={th}>סה״כ</th></tr></thead>
               <tbody>
                 {months.map(k=>{
-                  const c=data[k]?.clicks||0;
+                  const c=countFor(k);
                   return (
                     <tr key={k} style={{borderBottom:"1px solid #f1f5f9"}}>
                       <td style={td}>{labelFromKey(k)}</td>
@@ -173,21 +221,32 @@ function ShmulikTab({ data, selKey, selLabel, sync }){
 }
 
 // ── ENGEL TAB ──────────────────────────────────────────────────
-function PersonCard({ title, color, amount, person, monthData, selKey, sync }){
-  const d = monthData[person] || {balance:0, log:[]};
+function PersonCard({ title, color, amount, person, allData, selKey, sync }){
+  const d = allData[selKey]?.[person] || {balance:0, log:[]};
   const balance = d.balance||0;
   const log = d.log||[];
   const [partial,setPartial]=useState("");
+  const [chargeTime,setChargeTime]=useState(nowLocalInput());
 
-  const addClick = () => {
-    const newLog=[...log,{ts:Date.now(),amount}];
-    sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}`, {balance:balance+amount, log:newLog}));
+  const addCharge = () => {
+    const dt = chargeTime ? new Date(chargeTime) : new Date();
+    const ts = dt.getTime();
+    const targetKey = mkMonthKey(dt.getFullYear(),dt.getMonth());
+    const tcur = allData[targetKey]?.[person] || {balance:0, log:[]};
+    const tlog = (tcur.log||[]).concat([{ts,amount}]).sort((a,b)=>a.ts-b.ts);
+    sync(()=>fbSet(`melavim/engel/months/${targetKey}/${person}`, {balance:(tcur.balance||0)+amount, log:tlog}));
+    setChargeTime(nowLocalInput());
   };
   const undoClick = () => {
     if(!log.length) return;
     const last=log[log.length-1];
     const newLog=log.slice(0,-1);
     sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}`, {balance:Math.max(0,balance-last.amount), log:newLog}));
+  };
+  const removeEntry = (i) => {
+    const entry=log[i];
+    const newLog=log.filter((_,idx)=>idx!==i);
+    sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}`, {balance:Math.max(0,balance-entry.amount), log:newLog}));
   };
   const fullPay = () => sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}/balance`, 0));
   const partialPay = () => {
@@ -202,10 +261,12 @@ function PersonCard({ title, color, amount, person, monthData, selKey, sync }){
         <span style={{fontWeight:700,fontSize:15}}>{title}</span>
         <span style={{fontSize:20,fontWeight:800,color}}>{fmt(balance)} ₪</span>
       </div>
-      <div style={{display:"flex",gap:8,marginBottom:8}}>
-        <button style={{...bigBtn,flex:1,background:color}} onClick={addClick}>➕ {amount} ₪</button>
+      <div style={{display:"flex",gap:8,marginBottom:4}}>
+        <input style={{...iinp,flex:1}} type="datetime-local" value={chargeTime} onChange={e=>setChargeTime(e.target.value)} />
+        <button style={{...bigBtn,background:color}} onClick={addCharge}>➕ {amount} ₪</button>
         <button style={{...smallBtn,opacity:log.length?1:0.5}} disabled={!log.length} onClick={undoClick}>↩ בטל</button>
       </div>
+      <div style={{fontSize:11,color:"#94a3b8",marginBottom:8}}>אפשר לשנות את התאריך כדי לרשום חיוב קודם — הוא יתווסף לחודש המתאים</div>
       <div style={{display:"flex",gap:8,marginBottom:8}}>
         <button style={{...smallBtn,flex:1,opacity:balance>0?1:0.5,background:"#f0fdf4",color:"#16a34a",border:"1px solid #86efac"}} disabled={!balance} onClick={fullPay}>💰 תשלום מלא</button>
       </div>
@@ -215,11 +276,18 @@ function PersonCard({ title, color, amount, person, monthData, selKey, sync }){
       </div>
       {log.length>0 && (
         <div style={{marginTop:10,maxHeight:120,overflowY:"auto",fontSize:11,color:"#64748b"}}>
-          {log.slice().reverse().map((l,i)=>(
-            <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderBottom:"1px solid #f1f5f9"}}>
-              <span>{fmtDateTime(l.ts)}</span><span>+{fmt(l.amount)} ₪</span>
-            </div>
-          ))}
+          {log.slice().reverse().map((l,i)=>{
+            const idx=log.length-1-i;
+            return (
+              <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"2px 0",borderBottom:"1px solid #f1f5f9"}}>
+                <span>{fmtDateTime(l.ts)}</span>
+                <span style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span>+{fmt(l.amount)} ₪</span>
+                  <button style={delBtn} onClick={()=>removeEntry(idx)}>✕</button>
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -243,8 +311,8 @@ function EngelTab({ data, selKey, selLabel, sync }){
         </div>
       </div>
 
-      <PersonCard title="שלום" color="#2563eb" amount={100} person="shalom" monthData={cur} selKey={selKey} sync={sync} />
-      <PersonCard title="זמבא" color="#7c3aed" amount={80}  person="zamba"  monthData={cur} selKey={selKey} sync={sync} />
+      <PersonCard title="שלום" color="#2563eb" amount={100} person="shalom" allData={data} selKey={selKey} sync={sync} />
+      <PersonCard title="זמבא" color="#7c3aed" amount={80}  person="zamba"  allData={data} selKey={selKey} sync={sync} />
     </div>
   );
 }
@@ -267,6 +335,7 @@ const empty    = {textAlign:"center",color:"#94a3b8",fontSize:13,padding:"10px 0
 const tbl      = {width:"100%",borderCollapse:"collapse",fontSize:13};
 const th       = {textAlign:"right",padding:"6px 4px",color:"#64748b",fontSize:11,borderBottom:"2px solid #e2e8f0"};
 const td       = {padding:"6px 4px",color:"#1e293b"};
+const delBtn   = {border:"none",background:"transparent",color:"#cbd5e1",cursor:"pointer",fontSize:13,padding:"0 2px",lineHeight:1};
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
