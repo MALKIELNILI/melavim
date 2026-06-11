@@ -227,6 +227,7 @@ function PersonCard({ title, color, amount, person, allData, selKey, sync }){
   const log = d.log||[];
   const [partial,setPartial]=useState("");
   const [chargeTime,setChargeTime]=useState(nowLocalInput());
+  const [showCal,setShowCal]=useState(false);
 
   const addCharge = () => {
     const dt = chargeTime ? new Date(chargeTime) : new Date();
@@ -236,6 +237,22 @@ function PersonCard({ title, color, amount, person, allData, selKey, sync }){
     const tlog = (tcur.log||[]).concat([{ts,amount}]).sort((a,b)=>a.ts-b.ts);
     sync(()=>fbSet(`melavim/engel/months/${targetKey}/${person}`, {balance:(tcur.balance||0)+amount, log:tlog}));
     setChargeTime(nowLocalInput());
+  };
+  const toggleDay = (day) => {
+    const [y,m] = selKey.split("-").map(Number);
+    const sameDay = log.filter(l=>{
+      const dt=new Date(l.ts);
+      return dt.getFullYear()===y && dt.getMonth()===m-1 && dt.getDate()===day;
+    });
+    if(sameDay.length>0){
+      const removeAmount = sameDay.reduce((s,e)=>s+e.amount,0);
+      const newLog = log.filter(l=>!sameDay.includes(l));
+      sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}`, {balance:Math.max(0,balance-removeAmount), log:newLog}));
+    } else {
+      const ts = new Date(y,m-1,day,12,0).getTime();
+      const newLog = [...log,{ts,amount}].sort((a,b)=>a.ts-b.ts);
+      sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}`, {balance:balance+amount, log:newLog}));
+    }
   };
   const undoClick = () => {
     if(!log.length) return;
@@ -267,6 +284,10 @@ function PersonCard({ title, color, amount, person, allData, selKey, sync }){
         <button style={{...smallBtn,opacity:log.length?1:0.5}} disabled={!log.length} onClick={undoClick}>↩ בטל</button>
       </div>
       <div style={{fontSize:11,color:"#94a3b8",marginBottom:8}}>אפשר לשנות את התאריך כדי לרשום חיוב קודם — הוא יתווסף לחודש המתאים</div>
+
+      <button style={{...smallBtn,width:"100%",marginBottom:8}} onClick={()=>setShowCal(s=>!s)}>{showCal?"📅 הסתר לוח חודש":"📅 לוח חודש — סימון ימים"}</button>
+      {showCal && <MonthCalendar log={log} color={color} selKey={selKey} onToggleDay={toggleDay} />}
+
       <div style={{display:"flex",gap:8,marginBottom:8}}>
         <button style={{...smallBtn,flex:1,opacity:balance>0?1:0.5,background:"#f0fdf4",color:"#16a34a",border:"1px solid #86efac"}} disabled={!balance} onClick={fullPay}>💰 תשלום מלא</button>
       </div>
@@ -290,6 +311,39 @@ function PersonCard({ title, color, amount, person, allData, selKey, sync }){
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+function MonthCalendar({ log, color, selKey, onToggleDay }){
+  const [y,m] = selKey.split("-").map(Number);
+  const daysInMonth = new Date(y,m,0).getDate();
+  const today = new Date();
+  const isCurMonth = today.getFullYear()===y && (today.getMonth()+1)===m;
+  const markedDays = new Set(
+    log.filter(l=>{
+      const dt=new Date(l.ts);
+      return dt.getFullYear()===y && dt.getMonth()===m-1;
+    }).map(l=>new Date(l.ts).getDate())
+  );
+
+  return (
+    <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:8}}>
+      {Array.from({length:daysInMonth},(_,i)=>i+1).map(day=>{
+        const on = markedDays.has(day);
+        const isToday = isCurMonth && today.getDate()===day;
+        return (
+          <button key={day}
+            style={{padding:"8px 0",borderRadius:6,
+              border:isToday?"2px solid #f59e0b":(on?`2px solid ${color}`:"1px solid #e2e8f0"),
+              background:on?color:"#f8fafc",
+              color:on?"#fff":"#64748b",
+              fontSize:12,fontWeight:600,cursor:"pointer"}}
+            onClick={()=>onToggleDay(day)}>
+            {day}
+          </button>
+        );
+      })}
     </div>
   );
 }
