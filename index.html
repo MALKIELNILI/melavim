@@ -92,7 +92,7 @@ function App(){
     let loaded={sh:false,en:false,ph:false};
     const check=()=>{ if(loaded.sh&&loaded.en&&loaded.ph) setReady(true); };
     const u1=fbListen("melavim/shmulik/months",v=>{ setShmulik(v||{}); loaded.sh=true; check(); });
-    const u2=fbListen("melavim/engel/months",   v=>{ setEngel(v||{});   loaded.en=true; check(); });
+    const u2=fbListen("melavim/engel",          v=>{ setEngel(v||{});   loaded.en=true; check(); });
     const u3=fbListen("melavim/phones",         v=>{ setPhones(v||{}); loaded.ph=true; check(); });
     return ()=>{u1();u2();u3();};
   },[]);
@@ -254,8 +254,8 @@ function ShmulikTab({ data, selKey, selLabel, sync, phone, setPhone }){
 }
 
 // ── ENGEL TAB ──────────────────────────────────────────────────
-function PersonCard({ title, color, amount, person, allData, selKey, sync }){
-  const d = allData[selKey]?.[person] || {balance:0, log:[]};
+function PersonCard({ title, color, amount, person, data, selKey, sync }){
+  const d = data[person] || {balance:0, log:[]};
   const balance = d.balance||0;
   const log = d.log||[];
   const [partial,setPartial]=useState("");
@@ -265,27 +265,25 @@ function PersonCard({ title, color, amount, person, allData, selKey, sync }){
   const addCharge = () => {
     const dt = chargeTime ? new Date(chargeTime) : new Date();
     const ts = dt.getTime();
-    const targetKey = mkMonthKey(dt.getFullYear(),dt.getMonth());
-    const tcur = allData[targetKey]?.[person] || {balance:0, log:[]};
-    const tlog = (tcur.log||[]).concat([{ts,amount}]).sort((a,b)=>a.ts-b.ts);
-    sync(()=>fbSet(`melavim/engel/months/${targetKey}/${person}`, {balance:(tcur.balance||0)+amount, log:tlog}));
+    const newLog = [...log,{ts,amount}].sort((a,b)=>a.ts-b.ts);
+    sync(()=>fbSet(`melavim/engel/${person}`, {balance:balance+amount, log:newLog}));
     setChargeTime(nowLocalInput());
   };
   const undoClick = () => {
     if(!log.length) return;
     const last=log[log.length-1];
     const newLog=log.slice(0,-1);
-    sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}`, {balance:Math.max(0,balance-last.amount), log:newLog}));
+    sync(()=>fbSet(`melavim/engel/${person}`, {balance:Math.max(0,balance-last.amount), log:newLog}));
   };
   const removeEntry = (i) => {
     const entry=log[i];
     const newLog=log.filter((_,idx)=>idx!==i);
-    sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}`, {balance:Math.max(0,balance-entry.amount), log:newLog}));
+    sync(()=>fbSet(`melavim/engel/${person}`, {balance:Math.max(0,balance-entry.amount), log:newLog}));
   };
-  const fullPay = () => sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}/balance`, 0));
+  const fullPay = () => sync(()=>fbSet(`melavim/engel/${person}`, {balance:0, log:[]}));
   const partialPay = () => {
     const v=Number(partial)||0;
-    if(v>0) sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}/balance`, Math.max(0,balance-v)));
+    if(v>0) sync(()=>fbSet(`melavim/engel/${person}/balance`, Math.max(0,balance-v)));
     setPartial("");
   };
 
@@ -300,10 +298,10 @@ function PersonCard({ title, color, amount, person, allData, selKey, sync }){
         <button style={{...bigBtn,background:color}} onClick={addCharge}>➕ {amount} ₪</button>
         <button style={{...smallBtn,opacity:log.length?1:0.5}} disabled={!log.length} onClick={undoClick}>↩ בטל</button>
       </div>
-      <div style={{fontSize:11,color:"#94a3b8",marginBottom:8}}>אפשר לשנות את התאריך כדי לרשום חיוב קודם — הוא יתווסף לחודש המתאים</div>
+      <div style={{fontSize:11,color:"#94a3b8",marginBottom:8}}>אפשר לשנות את התאריך כדי לרשום חיוב קודם — הוא יתווסף לסכום הכולל</div>
 
       <button style={{...smallBtn,width:"100%",marginBottom:8}} onClick={()=>setShowCal(s=>!s)}>{showCal?"📅 הסתר לוח חודש":"📅 לוח חודש — סימון ימים"}</button>
-      {showCal && <MonthCalendar allData={allData} person={person} amount={amount} color={color} selKey={selKey} sync={sync} />}
+      {showCal && <MonthCalendar log={log} balance={balance} person={person} amount={amount} color={color} selKey={selKey} sync={sync} />}
 
       <div style={{display:"flex",gap:8,marginBottom:8}}>
         <button style={{...smallBtn,flex:1,opacity:balance>0?1:0.5,background:"#f0fdf4",color:"#16a34a",border:"1px solid #86efac"}} disabled={!balance} onClick={fullPay}>💰 תשלום מלא</button>
@@ -334,17 +332,17 @@ function PersonCard({ title, color, amount, person, allData, selKey, sync }){
 
 const WEEKDAYS_HE = ["א","ב","ג","ד","ה","ו","ש"];
 
-function MonthCalendar({ allData, person, amount, color, selKey, sync }){
+function MonthCalendar({ log, balance, person, amount, color, selKey, sync }){
   const [viewKey,setViewKey] = useState(selKey);
   const [vy,vm] = viewKey.split("-").map(Number);
   const daysInMonth = new Date(vy,vm,0).getDate();
   const firstDow = new Date(vy,vm-1,1).getDay();
   const today = new Date();
   const isCurMonth = today.getFullYear()===vy && (today.getMonth()+1)===vm;
-  const md = allData[viewKey]?.[person] || {balance:0, log:[]};
-  const log = md.log||[];
-  const balance = md.balance||0;
-  const markedDays = new Set(log.map(l=>new Date(l.ts).getDate()));
+  const markedDays = new Set(
+    log.filter(l=>{ const d=new Date(l.ts); return d.getFullYear()===vy && (d.getMonth()+1)===vm; })
+       .map(l=>new Date(l.ts).getDate())
+  );
 
   const shiftMonth = (delta) => {
     let y=vy, m=(vm-1)+delta;
@@ -354,15 +352,18 @@ function MonthCalendar({ allData, person, amount, color, selKey, sync }){
   };
 
   const toggleDay = (day) => {
-    const sameDay = log.filter(l=>new Date(l.ts).getDate()===day);
+    const sameDay = log.filter(l=>{
+      const d=new Date(l.ts);
+      return d.getFullYear()===vy && (d.getMonth()+1)===vm && d.getDate()===day;
+    });
     if(sameDay.length>0){
       const removeAmount = sameDay.reduce((s,e)=>s+e.amount,0);
       const newLog = log.filter(l=>!sameDay.includes(l));
-      sync(()=>fbSet(`melavim/engel/months/${viewKey}/${person}`, {balance:Math.max(0,balance-removeAmount), log:newLog}));
+      sync(()=>fbSet(`melavim/engel/${person}`, {balance:Math.max(0,balance-removeAmount), log:newLog}));
     } else {
       const ts = new Date(vy,vm-1,day,12,0).getTime();
       const newLog = [...log,{ts,amount}].sort((a,b)=>a.ts-b.ts);
-      sync(()=>fbSet(`melavim/engel/months/${viewKey}/${person}`, {balance:balance+amount, log:newLog}));
+      sync(()=>fbSet(`melavim/engel/${person}`, {balance:balance+amount, log:newLog}));
     }
   };
 
@@ -401,9 +402,8 @@ function MonthCalendar({ allData, person, amount, color, selKey, sync }){
 }
 
 function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
-  const cur = data[selKey] || {};
-  const shalom = cur.shalom || {balance:0,log:[]};
-  const zamba  = cur.zamba  || {balance:0,log:[]};
+  const shalom = data.shalom || {balance:0,log:[]};
+  const zamba  = data.zamba  || {balance:0,log:[]};
   const combined = (shalom.balance||0)+(zamba.balance||0);
   const [phoneInput,setPhoneInput] = useState(phone||"");
   useEffect(()=>{ setPhoneInput(phone||""); },[phone]);
@@ -414,14 +414,14 @@ function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
       ...(zamba.log||[]).map(l=>({...l,who:"זמבא"})),
     ].sort((a,b)=>a.ts-b.ts);
     const lines = entries.map(l=>`${fmtDateShort(l.ts)} - ${l.who} - ${fmt(l.amount)} ₪`);
-    const text = `שלום אנגל! 👋\nסיכום ${selLabel}:\n\n${lines.join("\n")}\n\nשלום: ${fmt(shalom.balance||0)} ₪\nזמבא: ${fmt(zamba.balance||0)} ₪\n\n💰 סה״כ לתשלום: ${fmt(combined)} ₪ 🙏`;
+    const text = `שלום אנגל! 👋\nסיכום נסיעות:\n\n${lines.join("\n")}\n\nשלום: ${fmt(shalom.balance||0)} ₪\nזמבא: ${fmt(zamba.balance||0)} ₪\n\n💰 סה״כ לתשלום (שלום+זמבא): ${fmt(combined)} ₪ 🙏`;
     window.open(waLink(phoneInput,text),"_blank");
   };
 
   return (
     <div style={col}>
       <div style={bigCard}>
-        <div style={{fontSize:13,opacity:.75,marginBottom:4}}>{selLabel} — לשלוח לאנגל</div>
+        <div style={{fontSize:13,opacity:.75,marginBottom:4}}>סה״כ לשלוח לאנגל</div>
         <div style={{fontSize:42,fontWeight:800}}>{fmt(combined)} ₪</div>
         <div style={{display:"flex",gap:7,marginTop:10,flexWrap:"wrap"}}>
           <Chip label="שלום" val={fmt(shalom.balance||0)+" ₪"} />
@@ -429,8 +429,8 @@ function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
         </div>
       </div>
 
-      <PersonCard title="שלום" color="#2563eb" amount={100} person="shalom" allData={data} selKey={selKey} sync={sync} />
-      <PersonCard title="זמבא" color="#7c3aed" amount={80}  person="zamba"  allData={data} selKey={selKey} sync={sync} />
+      <PersonCard title="שלום" color="#2563eb" amount={100} person="shalom" data={data} selKey={selKey} sync={sync} />
+      <PersonCard title="זמבא" color="#7c3aed" amount={80}  person="zamba"  data={data} selKey={selKey} sync={sync} />
 
       <div style={card}>
         <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>📲 שליחת סיכום לאנגל</div>
