@@ -271,22 +271,6 @@ function PersonCard({ title, color, amount, person, allData, selKey, sync }){
     sync(()=>fbSet(`melavim/engel/months/${targetKey}/${person}`, {balance:(tcur.balance||0)+amount, log:tlog}));
     setChargeTime(nowLocalInput());
   };
-  const toggleDay = (day) => {
-    const [y,m] = selKey.split("-").map(Number);
-    const sameDay = log.filter(l=>{
-      const dt=new Date(l.ts);
-      return dt.getFullYear()===y && dt.getMonth()===m-1 && dt.getDate()===day;
-    });
-    if(sameDay.length>0){
-      const removeAmount = sameDay.reduce((s,e)=>s+e.amount,0);
-      const newLog = log.filter(l=>!sameDay.includes(l));
-      sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}`, {balance:Math.max(0,balance-removeAmount), log:newLog}));
-    } else {
-      const ts = new Date(y,m-1,day,12,0).getTime();
-      const newLog = [...log,{ts,amount}].sort((a,b)=>a.ts-b.ts);
-      sync(()=>fbSet(`melavim/engel/months/${selKey}/${person}`, {balance:balance+amount, log:newLog}));
-    }
-  };
   const undoClick = () => {
     if(!log.length) return;
     const last=log[log.length-1];
@@ -319,7 +303,7 @@ function PersonCard({ title, color, amount, person, allData, selKey, sync }){
       <div style={{fontSize:11,color:"#94a3b8",marginBottom:8}}>אפשר לשנות את התאריך כדי לרשום חיוב קודם — הוא יתווסף לחודש המתאים</div>
 
       <button style={{...smallBtn,width:"100%",marginBottom:8}} onClick={()=>setShowCal(s=>!s)}>{showCal?"📅 הסתר לוח חודש":"📅 לוח חודש — סימון ימים"}</button>
-      {showCal && <MonthCalendar log={log} color={color} selKey={selKey} onToggleDay={toggleDay} />}
+      {showCal && <MonthCalendar allData={allData} person={person} amount={amount} color={color} selKey={selKey} sync={sync} />}
 
       <div style={{display:"flex",gap:8,marginBottom:8}}>
         <button style={{...smallBtn,flex:1,opacity:balance>0?1:0.5,background:"#f0fdf4",color:"#16a34a",border:"1px solid #86efac"}} disabled={!balance} onClick={fullPay}>💰 תשלום מלא</button>
@@ -348,35 +332,70 @@ function PersonCard({ title, color, amount, person, allData, selKey, sync }){
   );
 }
 
-function MonthCalendar({ log, color, selKey, onToggleDay }){
-  const [y,m] = selKey.split("-").map(Number);
-  const daysInMonth = new Date(y,m,0).getDate();
+const WEEKDAYS_HE = ["א","ב","ג","ד","ה","ו","ש"];
+
+function MonthCalendar({ allData, person, amount, color, selKey, sync }){
+  const [viewKey,setViewKey] = useState(selKey);
+  const [vy,vm] = viewKey.split("-").map(Number);
+  const daysInMonth = new Date(vy,vm,0).getDate();
+  const firstDow = new Date(vy,vm-1,1).getDay();
   const today = new Date();
-  const isCurMonth = today.getFullYear()===y && (today.getMonth()+1)===m;
-  const markedDays = new Set(
-    log.filter(l=>{
-      const dt=new Date(l.ts);
-      return dt.getFullYear()===y && dt.getMonth()===m-1;
-    }).map(l=>new Date(l.ts).getDate())
-  );
+  const isCurMonth = today.getFullYear()===vy && (today.getMonth()+1)===vm;
+  const md = allData[viewKey]?.[person] || {balance:0, log:[]};
+  const log = md.log||[];
+  const balance = md.balance||0;
+  const markedDays = new Set(log.map(l=>new Date(l.ts).getDate()));
+
+  const shiftMonth = (delta) => {
+    let y=vy, m=(vm-1)+delta;
+    if(m<0){ y--; m+=12; }
+    if(m>11){ y++; m-=12; }
+    setViewKey(mkMonthKey(y,m));
+  };
+
+  const toggleDay = (day) => {
+    const sameDay = log.filter(l=>new Date(l.ts).getDate()===day);
+    if(sameDay.length>0){
+      const removeAmount = sameDay.reduce((s,e)=>s+e.amount,0);
+      const newLog = log.filter(l=>!sameDay.includes(l));
+      sync(()=>fbSet(`melavim/engel/months/${viewKey}/${person}`, {balance:Math.max(0,balance-removeAmount), log:newLog}));
+    } else {
+      const ts = new Date(vy,vm-1,day,12,0).getTime();
+      const newLog = [...log,{ts,amount}].sort((a,b)=>a.ts-b.ts);
+      sync(()=>fbSet(`melavim/engel/months/${viewKey}/${person}`, {balance:balance+amount, log:newLog}));
+    }
+  };
 
   return (
-    <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:8}}>
-      {Array.from({length:daysInMonth},(_,i)=>i+1).map(day=>{
-        const on = markedDays.has(day);
-        const isToday = isCurMonth && today.getDate()===day;
-        return (
-          <button key={day}
-            style={{padding:"8px 0",borderRadius:6,
-              border:isToday?"2px solid #f59e0b":(on?`2px solid ${color}`:"1px solid #e2e8f0"),
-              background:on?color:"#f8fafc",
-              color:on?"#fff":"#64748b",
-              fontSize:12,fontWeight:600,cursor:"pointer"}}
-            onClick={()=>onToggleDay(day)}>
-            {day}
-          </button>
-        );
-      })}
+    <div style={{marginBottom:8}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+        <button style={smallBtn} onClick={()=>shiftMonth(-1)}>◀</button>
+        <span style={{fontWeight:700,fontSize:13}}>{labelFromKey(viewKey)}</span>
+        <button style={smallBtn} onClick={()=>shiftMonth(1)}>▶</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:4}}>
+        {WEEKDAYS_HE.map(w=>(
+          <div key={w} style={{textAlign:"center",fontSize:11,color:"#94a3b8",fontWeight:700}}>{w}</div>
+        ))}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4}}>
+        {Array.from({length:firstDow}).map((_,i)=><div key={"e"+i}/>)}
+        {Array.from({length:daysInMonth},(_,i)=>i+1).map(day=>{
+          const on = markedDays.has(day);
+          const isToday = isCurMonth && today.getDate()===day;
+          return (
+            <button key={day}
+              style={{padding:"8px 0",borderRadius:6,
+                border:isToday?"2px solid #f59e0b":(on?`2px solid ${color}`:"1px solid #e2e8f0"),
+                background:on?color:"#f8fafc",
+                color:on?"#fff":"#64748b",
+                fontSize:12,fontWeight:600,cursor:"pointer"}}
+              onClick={()=>toggleDay(day)}>
+              {day}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
