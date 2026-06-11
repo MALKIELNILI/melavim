@@ -63,6 +63,13 @@ const nowLocalInput = () => {
   const pad = n => String(n).padStart(2,'0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
+const fmtDateShort = ts => new Date(ts).toLocaleDateString("he-IL",{day:"2-digit",month:"2-digit"});
+const toIntlPhone = p => {
+  let d = (p||"").replace(/\D/g,"");
+  if(d.startsWith("0")) d = "972"+d.slice(1);
+  return d;
+};
+const waLink = (phone,text) => `https://wa.me/${toIntlPhone(phone)}?text=${encodeURIComponent(text)}`;
 
 // ── FIREBASE HELPERS ─────────────────────────────────────────
 function fbSet(path,val){ db.ref(path).set(val); }
@@ -79,16 +86,19 @@ function App(){
   const [syncing,setSyncing] = useState(false);
   const [shmulik,setShmulik] = useState({});
   const [engel,setEngel]     = useState({});
+  const [phones,setPhones]   = useState({});
 
   useEffect(()=>{
-    let loaded={sh:false,en:false};
-    const check=()=>{ if(loaded.sh&&loaded.en) setReady(true); };
+    let loaded={sh:false,en:false,ph:false};
+    const check=()=>{ if(loaded.sh&&loaded.en&&loaded.ph) setReady(true); };
     const u1=fbListen("melavim/shmulik/months",v=>{ setShmulik(v||{}); loaded.sh=true; check(); });
     const u2=fbListen("melavim/engel/months",   v=>{ setEngel(v||{});   loaded.en=true; check(); });
-    return ()=>{u1();u2();};
+    const u3=fbListen("melavim/phones",         v=>{ setPhones(v||{}); loaded.ph=true; check(); });
+    return ()=>{u1();u2();u3();};
   },[]);
 
   const sync = fn => { setSyncing(true); fn(); setTimeout(()=>setSyncing(false),900); };
+  const setPhone = (key,val) => fbSet(`melavim/phones/${key}`, val);
 
   const selKey   = mkMonthKey(now.getFullYear(),now.getMonth());
   const selLabel = mkMonthLabel(now.getFullYear(),now.getMonth());
@@ -123,29 +133,42 @@ function App(){
       </header>
 
       <main style={{maxWidth:520,margin:"0 auto",padding:"12px 14px"}}>
-        {tab==="shmulik" && <ShmulikTab data={shmulik} selKey={selKey} selLabel={selLabel} sync={sync}/>}
-        {tab==="engel"   && <EngelTab   data={engel}   selKey={selKey} selLabel={selLabel} sync={sync}/>}
+        {tab==="shmulik" && <ShmulikTab data={shmulik} selKey={selKey} selLabel={selLabel} sync={sync} phone={phones.shmulik} setPhone={v=>setPhone("shmulik",v)}/>}
+        {tab==="engel"   && <EngelTab   data={engel}   selKey={selKey} selLabel={selLabel} sync={sync} phone={phones.engel} setPhone={v=>setPhone("engel",v)}/>}
       </main>
     </div>
   );
 }
 
 // ── SHMULIK TAB ────────────────────────────────────────────────
-function ShmulikTab({ data, selKey, selLabel, sync }){
+const SHMULIK_TYPES = {morning:{icon:"🌅",label:"בוקר"}, afternoon:{icon:"🌞",label:"צהריים"}};
+
+function ShmulikTab({ data, selKey, selLabel, sync, phone, setPhone }){
   const cur   = data[selKey] || {};
   const log   = cur.log || [];
   const clicks= cur.log ? cur.log.length : (cur.clicks||0);
   const total = clicks*20;
   const [chargeTime,setChargeTime] = useState(nowLocalInput());
+  const [chargeType,setChargeType] = useState(new Date().getHours()<12?"morning":"afternoon");
+  const [phoneInput,setPhoneInput] = useState(phone||"");
+  useEffect(()=>{ setPhoneInput(phone||""); },[phone]);
 
   const addCharge = () => {
     const d = chargeTime ? new Date(chargeTime) : new Date();
     const ts = d.getTime();
     const targetKey = mkMonthKey(d.getFullYear(),d.getMonth());
     const tcur = data[targetKey] || {};
-    const tlog = (tcur.log||[]).concat([{ts}]).sort((a,b)=>a.ts-b.ts);
+    const tlog = (tcur.log||[]).concat([{ts,type:chargeType}]).sort((a,b)=>a.ts-b.ts);
     sync(()=>fbSet(`melavim/shmulik/months/${targetKey}`, {...tcur, log:tlog, clicks:tlog.length}));
     setChargeTime(nowLocalInput());
+  };
+  const sendSummary = () => {
+    const lines = log.slice().sort((a,b)=>a.ts-b.ts).map(l=>{
+      const t = SHMULIK_TYPES[l.type];
+      return `${fmtDateShort(l.ts)} - ${t?`${t.icon} ${t.label}`:"ליווי"} - 20 ₪`;
+    });
+    const text = `שלום שמוליק! 👋\nסיכום ${selLabel}:\n\n${lines.join("\n")}\n\nסה״כ: ${clicks} ליוויים × 20 ₪ = ${fmt(total)} ₪ 🙏`;
+    window.open(waLink(phoneInput,text),"_blank");
   };
   const undoClick = () => {
     if(!log.length) return;
@@ -169,6 +192,10 @@ function ShmulikTab({ data, selKey, selLabel, sync }){
       </div>
 
       <div style={{display:"flex",gap:8}}>
+        <button style={typeBtn(chargeType==="morning")} onClick={()=>setChargeType("morning")}>🌅 בוקר</button>
+        <button style={typeBtn(chargeType==="afternoon")} onClick={()=>setChargeType("afternoon")}>🌞 צהריים</button>
+      </div>
+      <div style={{display:"flex",gap:8}}>
         <input style={{...iinp,flex:1}} type="datetime-local" value={chargeTime} onChange={e=>setChargeTime(e.target.value)} />
         <button style={{...bigBtn,flex:"0 0 auto"}} onClick={addCharge}>➕ 20 ₪</button>
       </div>
@@ -183,7 +210,7 @@ function ShmulikTab({ data, selKey, selLabel, sync }){
               const idx=log.length-1-i;
               return (
                 <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:"#64748b",padding:"4px 0",borderBottom:"1px solid #f1f5f9"}}>
-                  <span>{fmtDateTime(l.ts)}</span>
+                  <span>{fmtDateTime(l.ts)}{l.type?` · ${SHMULIK_TYPES[l.type].icon} ${SHMULIK_TYPES[l.type].label}`:""}</span>
                   <span style={{display:"flex",alignItems:"center",gap:6}}>
                     <span>20 ₪</span>
                     <button style={delBtn} onClick={()=>removeEntry(idx)}>✕</button>
@@ -194,6 +221,12 @@ function ShmulikTab({ data, selKey, selLabel, sync }){
           </div>
         </div>
       )}
+
+      <div style={card}>
+        <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>📲 שליחת סיכום לשמוליק</div>
+        <input style={{...iinp,width:"100%",marginBottom:8}} type="tel" placeholder="מספר טלפון (לדוגמה 0501234567)" value={phoneInput} onChange={e=>{setPhoneInput(e.target.value); setPhone(e.target.value);}} />
+        <button style={{...bigBtn,width:"100%",background:"#25D366",opacity:log.length?1:0.5}} disabled={!log.length} onClick={sendSummary}>📤 שלח סיכום בוואטסאפ</button>
+      </div>
 
       <div style={card}>
         <div style={{fontWeight:700,fontSize:14,marginBottom:10}}>📂 סיכום חודשים קודמים</div>
@@ -348,11 +381,23 @@ function MonthCalendar({ log, color, selKey, onToggleDay }){
   );
 }
 
-function EngelTab({ data, selKey, selLabel, sync }){
+function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
   const cur = data[selKey] || {};
   const shalom = cur.shalom || {balance:0,log:[]};
   const zamba  = cur.zamba  || {balance:0,log:[]};
   const combined = (shalom.balance||0)+(zamba.balance||0);
+  const [phoneInput,setPhoneInput] = useState(phone||"");
+  useEffect(()=>{ setPhoneInput(phone||""); },[phone]);
+
+  const sendSummary = () => {
+    const entries = [
+      ...(shalom.log||[]).map(l=>({...l,who:"שלום"})),
+      ...(zamba.log||[]).map(l=>({...l,who:"זמבא"})),
+    ].sort((a,b)=>a.ts-b.ts);
+    const lines = entries.map(l=>`${fmtDateShort(l.ts)} - ${l.who} - ${fmt(l.amount)} ₪`);
+    const text = `שלום אנגל! 👋\nסיכום ${selLabel}:\n\n${lines.join("\n")}\n\nשלום: ${fmt(shalom.balance||0)} ₪\nזמבא: ${fmt(zamba.balance||0)} ₪\n\n💰 סה״כ לתשלום: ${fmt(combined)} ₪ 🙏`;
+    window.open(waLink(phoneInput,text),"_blank");
+  };
 
   return (
     <div style={col}>
@@ -367,6 +412,12 @@ function EngelTab({ data, selKey, selLabel, sync }){
 
       <PersonCard title="שלום" color="#2563eb" amount={100} person="shalom" allData={data} selKey={selKey} sync={sync} />
       <PersonCard title="זמבא" color="#7c3aed" amount={80}  person="zamba"  allData={data} selKey={selKey} sync={sync} />
+
+      <div style={card}>
+        <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>📲 שליחת סיכום לאנגל</div>
+        <input style={{...iinp,width:"100%",marginBottom:8}} type="tel" placeholder="מספר טלפון (לדוגמה 0501234567)" value={phoneInput} onChange={e=>{setPhoneInput(e.target.value); setPhone(e.target.value);}} />
+        <button style={{...bigBtn,width:"100%",background:"#25D366",opacity:combined?1:0.5}} disabled={!combined} onClick={sendSummary}>📤 שלח סיכום בוואטסאפ</button>
+      </div>
     </div>
   );
 }
@@ -390,6 +441,7 @@ const tbl      = {width:"100%",borderCollapse:"collapse",fontSize:13};
 const th       = {textAlign:"right",padding:"6px 4px",color:"#64748b",fontSize:11,borderBottom:"2px solid #e2e8f0"};
 const td       = {padding:"6px 4px",color:"#1e293b"};
 const delBtn   = {border:"none",background:"transparent",color:"#cbd5e1",cursor:"pointer",fontSize:13,padding:"0 2px",lineHeight:1};
+const typeBtn  = on => ({flex:1,padding:"8px 0",borderRadius:8,border:on?"2px solid #2563eb":"1px solid #e2e8f0",background:on?"#eff6ff":"#f8fafc",color:on?"#1e3a5f":"#64748b",cursor:"pointer",fontSize:13,fontWeight:600});
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
