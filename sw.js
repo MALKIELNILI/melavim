@@ -1,4 +1,4 @@
-const CACHE = 'melavim-v20260612-1100';
+const CACHE = 'melavim-v20260612-1130';
 const FILES = ['./','./index.html','./manifest.json','./icon.jpg'];
 
 self.addEventListener('install', e => {

@@ -163,12 +163,20 @@ function ShmulikTab({ data, selKey, selLabel, sync, phone, setPhone }){
     setChargeTime(nowLocalInput());
   };
   const sendSummary = () => {
-    const lines = log.slice().sort((a,b)=>a.ts-b.ts).map(l=>{
+    const lastSentTs = cur.lastSentTs||0;
+    const newEntries = log.filter(l=>l.ts>lastSentTs).sort((a,b)=>a.ts-b.ts);
+    const newSum = newEntries.length*20;
+    const prevAmount = Math.max(0, total-newSum);
+    const lines = newEntries.map(l=>{
       const t = SHMULIK_TYPES[l.type];
       return `${fmtDateShort(l.ts)} - ${t?`${t.icon} ${t.label}`:"ליווי"} - 20 ₪`;
     });
-    const text = `שלום שמוליק! 👋\nסיכום ${selLabel}:\n\n${lines.join("\n")}\n\nסה״כ: ${clicks} ליוויים × 20 ₪ = ${fmt(total)} ₪ 🙏`;
+    let body = lines.length ? lines.join("\n") : "(אין ליוויים חדשים מהשליחה הקודמת)";
+    body += `\n\nנוכחי: ${newEntries.length} ליוויים × 20 ₪ = ${fmt(newSum)} ₪`;
+    if(prevAmount>0) body += `\nקודם (לא שולם): ${fmt(prevAmount)} ₪`;
+    const text = `שלום שמוליק! 👋\nסיכום ${selLabel}:\n\n${body}\n\n💰 סה״כ: ${fmt(total)} ₪ 🙏`;
     window.open(waLink(phoneInput,text),"_blank");
+    sync(()=>fbSet(`melavim/shmulik/months/${selKey}/lastSentTs`, Date.now()));
   };
   const undoClick = () => {
     if(!log.length) return;
@@ -409,13 +417,29 @@ function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
   useEffect(()=>{ setPhoneInput(phone||""); },[phone]);
 
   const sendSummary = () => {
+    const shalomLastSent = shalom.lastSentTs||0;
+    const zambaLastSent  = zamba.lastSentTs||0;
+    const shalomNew = (shalom.log||[]).filter(l=>l.ts>shalomLastSent);
+    const zambaNew  = (zamba.log||[]).filter(l=>l.ts>zambaLastSent);
+    const shalomNewSum = shalomNew.reduce((s,e)=>s+e.amount,0);
+    const zambaNewSum  = zambaNew.reduce((s,e)=>s+e.amount,0);
+    const newSum  = shalomNewSum+zambaNewSum;
+    const prevAmount = Math.max(0,(shalom.balance||0)-shalomNewSum) + Math.max(0,(zamba.balance||0)-zambaNewSum);
+
     const entries = [
-      ...(shalom.log||[]).map(l=>({...l,who:"שלום"})),
-      ...(zamba.log||[]).map(l=>({...l,who:"זמבא"})),
+      ...shalomNew.map(l=>({...l,who:"שלום"})),
+      ...zambaNew.map(l=>({...l,who:"זמבא"})),
     ].sort((a,b)=>a.ts-b.ts);
-    const lines = entries.map(l=>`${fmtDateShort(l.ts)} - ${l.who} - ${fmt(l.amount)} ₪`);
-    const text = `שלום אנגל! 👋\nסיכום נסיעות:\n\n${lines.join("\n")}\n\nשלום: ${fmt(shalom.balance||0)} ₪\nזמבא: ${fmt(zamba.balance||0)} ₪\n\n💰 סה״כ לתשלום (שלום+זמבא): ${fmt(combined)} ₪ 🙏`;
+    let body = entries.length
+      ? entries.map(l=>`${fmtDateShort(l.ts)} - ${l.who} - ${fmt(l.amount)} ₪`).join("\n")
+      : "(אין נסיעות חדשות מהשליחה הקודמת)";
+    body += `\n\nנוכחי: ${fmt(newSum)} ₪`;
+    if(prevAmount>0) body += `\nקודם (לא שולם): ${fmt(prevAmount)} ₪`;
+
+    const text = `שלום אנגל! 👋\nסיכום נסיעות:\n\n${body}\n\nשלום: ${fmt(shalom.balance||0)} ₪\nזמבא: ${fmt(zamba.balance||0)} ₪\n\n💰 סה״כ לתשלום (שלום+זמבא): ${fmt(combined)} ₪ 🙏`;
     window.open(waLink(phoneInput,text),"_blank");
+    const sentNow = Date.now();
+    sync(()=>{ fbSet(`melavim/engel/shalom/lastSentTs`, sentNow); fbSet(`melavim/engel/zamba/lastSentTs`, sentNow); });
   };
 
   return (
