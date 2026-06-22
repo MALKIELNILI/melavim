@@ -148,6 +148,10 @@ function ShmulikTab({ data, selKey, selLabel, sync, phone, setPhone }){
   const log   = cur.log || [];
   const clicks= cur.log ? cur.log.length : (cur.clicks||0);
   const total = clicks*20;
+  const paymentsObj = cur.payments || {};
+  const totalPaid = Object.values(paymentsObj).reduce((s,p)=>s+(p.amount||0),0);
+  const remaining = total - totalPaid;
+
   const [chargeTime,setChargeTime] = useState(nowLocalInput());
   const [chargeType,setChargeType] = useState(new Date().getHours()<12?"morning":"afternoon");
   const [phoneInput,setPhoneInput] = useState(phone||"");
@@ -190,13 +194,14 @@ function ShmulikTab({ data, selKey, selLabel, sync, phone, setPhone }){
 
   const months = Object.keys(data).filter(k=>k!==selKey).sort().reverse();
   const countFor = k => { const m=data[k]; return m?.log?m.log.length:(m?.clicks||0); };
+  const paidFor  = k => { const p=data[k]?.payments||{}; return Object.values(p).reduce((s,x)=>s+(x.amount||0),0); };
 
   return (
     <div style={col}>
       <div style={bigCard}>
-        <div style={{fontSize:13,opacity:.75,marginBottom:4}}>{selLabel} — לתת לשמוליק</div>
-        <div style={{fontSize:42,fontWeight:800}}>{fmt(total)} ₪</div>
-        <div style={{fontSize:12,opacity:.7,marginTop:4}}>{clicks} × 20 ₪</div>
+        <div style={{fontSize:13,opacity:.75,marginBottom:4}}>{selLabel} — יתרה לגבייה</div>
+        <div style={{fontSize:42,fontWeight:800}}>{fmt(Math.max(0,remaining))} ₪</div>
+        <div style={{fontSize:12,opacity:.7,marginTop:4}}>חויב: {fmt(total)} ₪ &nbsp;|&nbsp; שולם: {fmt(totalPaid)} ₪</div>
       </div>
 
       <div style={{display:"flex",gap:8}}>
@@ -230,6 +235,8 @@ function ShmulikTab({ data, selKey, selLabel, sync, phone, setPhone }){
         </div>
       )}
 
+      <ShmulikPaymentsSection data={data} selKey={selKey} selLabel={selLabel} sync={sync} />
+
       <div style={card}>
         <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>📲 שליחת סיכום לשמוליק</div>
         <input style={{...iinp,width:"100%",marginBottom:8}} type="tel" placeholder="מספר טלפון (לדוגמה 0501234567)" value={phoneInput} onChange={e=>{setPhoneInput(e.target.value); setPhone(e.target.value);}} />
@@ -241,15 +248,20 @@ function ShmulikTab({ data, selKey, selLabel, sync, phone, setPhone }){
         {months.length===0
           ? <div style={empty}>אין עדיין נתונים מחודשים קודמים</div>
           : <table style={tbl}>
-              <thead><tr><th style={th}>חודש</th><th style={th}>חיובים</th><th style={th}>סה״כ</th></tr></thead>
+              <thead><tr><th style={th}>חודש</th><th style={th}>חיובים</th><th style={th}>סה״כ</th><th style={th}>שולם</th><th style={th}>יתרה</th></tr></thead>
               <tbody>
                 {months.map(k=>{
                   const c=countFor(k);
+                  const t=c*20;
+                  const pd=paidFor(k);
+                  const rem=t-pd;
                   return (
                     <tr key={k} style={{borderBottom:"1px solid #f1f5f9"}}>
                       <td style={td}>{labelFromKey(k)}</td>
                       <td style={td}>{c}</td>
-                      <td style={{...td,fontWeight:700}}>{fmt(c*20)} ₪</td>
+                      <td style={{...td,fontWeight:700}}>{fmt(t)} ₪</td>
+                      <td style={{...td,color:"#16a34a"}}>{fmt(pd)} ₪</td>
+                      <td style={{...td,fontWeight:700,color:rem>0?"#dc2626":"#16a34a"}}>{fmt(rem)} ₪</td>
                     </tr>
                   );
                 })}
@@ -261,12 +273,83 @@ function ShmulikTab({ data, selKey, selLabel, sync, phone, setPhone }){
   );
 }
 
+// ── SHMULIK PAYMENTS SECTION ──────────────────────────────────
+function ShmulikPaymentsSection({ data, selKey, selLabel, sync }){
+  const cur = data[selKey] || {};
+  const paymentsObj = cur.payments || {};
+  const payList = Object.values(paymentsObj).sort((a,b)=>a.ts-b.ts);
+
+  const [addAmt, setAddAmt]   = useState("");
+  const [addTime, setAddTime] = useState(nowLocalInput());
+  const [editKey, setEditKey] = useState(null);
+  const [editAmt, setEditAmt] = useState("");
+
+  const addPayment = () => {
+    const v = Number(addAmt);
+    if(!v || v<=0) return;
+    const ts = addTime ? new Date(addTime).getTime() : Date.now();
+    const key = String(ts);
+    sync(()=>fbSet(`melavim/shmulik/months/${selKey}/payments/${key}`, {ts, amount:v}));
+    setAddAmt("");
+    setAddTime(nowLocalInput());
+  };
+
+  const deletePayment = key => {
+    sync(()=>fbSet(`melavim/shmulik/months/${selKey}/payments/${key}`, null));
+  };
+
+  const saveEdit = () => {
+    const v = Number(editAmt);
+    if(v>0){
+      sync(()=>fbSet(`melavim/shmulik/months/${selKey}/payments/${editKey}`, {ts:Number(editKey), amount:v}));
+    }
+    setEditKey(null);
+  };
+
+  return (
+    <div style={{...card,borderRight:"4px solid #22c55e"}}>
+      <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>💰 תשלומים שהתקבלו — {selLabel}</div>
+      <div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+        <input style={{...iinp,flex:"1 1 80px",minWidth:80}} type="number" placeholder="סכום שהתקבל" value={addAmt} onChange={e=>setAddAmt(e.target.value)} />
+        <input style={{...iinp,flex:"2 1 130px",minWidth:130}} type="datetime-local" value={addTime} onChange={e=>setAddTime(e.target.value)} />
+        <button style={{...bigBtn,padding:"8px 14px",fontSize:13,flex:"0 0 auto"}} onClick={addPayment}>➕ הוסף</button>
+      </div>
+      {payList.length>0 ? (
+        <div style={{maxHeight:160,overflowY:"auto"}}>
+          {[...payList].reverse().map(p=>{
+            const key = String(p.ts);
+            return (
+              <div key={key} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 0",borderBottom:"1px solid #f1f5f9",fontSize:12}}>
+                <span style={{color:"#64748b",flex:1}}>{fmtDateTime(p.ts)}</span>
+                {editKey===key ? (
+                  <>
+                    <input style={{...iinp,width:80,fontSize:12,padding:"2px 4px"}} type="number" value={editAmt} onChange={e=>setEditAmt(e.target.value)} autoFocus />
+                    <button style={{...smallBtn,padding:"2px 8px",fontSize:11}} onClick={saveEdit}>✔</button>
+                    <button style={{...smallBtn,padding:"2px 8px",fontSize:11}} onClick={()=>setEditKey(null)}>✕</button>
+                  </>
+                ) : (
+                  <>
+                    <span style={{fontWeight:700,color:"#16a34a"}}>{fmt(p.amount)} ₪</span>
+                    <button style={{...smallBtn,padding:"2px 7px",fontSize:11}} onClick={()=>{setEditKey(key);setEditAmt(String(p.amount));}}>✏️</button>
+                    <button style={delBtn} onClick={()=>deletePayment(key)}>✕</button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={empty}>אין תשלומים שהוזנו עדיין</div>
+      )}
+    </div>
+  );
+}
+
 // ── ENGEL TAB ──────────────────────────────────────────────────
 function PersonCard({ title, color, amount, person, data, selKey, sync }){
   const d = data[person] || {balance:0, log:[]};
   const balance = d.balance||0;
   const log = d.log||[];
-  const [partial,setPartial]=useState("");
   const [chargeTime,setChargeTime]=useState(nowLocalInput());
   const [showCal,setShowCal]=useState(false);
 
@@ -288,12 +371,6 @@ function PersonCard({ title, color, amount, person, data, selKey, sync }){
     const newLog=log.filter((_,idx)=>idx!==i);
     sync(()=>fbSet(`melavim/engel/${person}`, {balance:Math.max(0,balance-entry.amount), log:newLog}));
   };
-  const fullPay = () => sync(()=>fbSet(`melavim/engel/${person}`, {balance:0, log:[]}));
-  const partialPay = () => {
-    const v=Number(partial)||0;
-    if(v>0) sync(()=>fbSet(`melavim/engel/${person}/balance`, Math.max(0,balance-v)));
-    setPartial("");
-  };
 
   return (
     <div style={{...card,borderRight:`4px solid ${color}`}}>
@@ -311,13 +388,6 @@ function PersonCard({ title, color, amount, person, data, selKey, sync }){
       <button style={{...smallBtn,width:"100%",marginBottom:8}} onClick={()=>setShowCal(s=>!s)}>{showCal?"📅 הסתר לוח חודש":"📅 לוח חודש — סימון ימים"}</button>
       {showCal && <MonthCalendar log={log} balance={balance} person={person} amount={amount} color={color} selKey={selKey} sync={sync} />}
 
-      <div style={{display:"flex",gap:8,marginBottom:8}}>
-        <button style={{...smallBtn,flex:1,opacity:balance>0?1:0.5,background:"#f0fdf4",color:"#16a34a",border:"1px solid #86efac"}} disabled={!balance} onClick={fullPay}>💰 תשלום מלא</button>
-      </div>
-      <div style={{display:"flex",gap:8}}>
-        <input style={{...iinp,flex:1}} type="number" placeholder="כמה קיבלתי (תשלום חלקי)" value={partial} onChange={e=>setPartial(e.target.value)} />
-        <button style={smallBtn} onClick={partialPay}>שלם חלקי</button>
-      </div>
       {log.length>0 && (
         <div style={{marginTop:10,maxHeight:120,overflowY:"auto",fontSize:11,color:"#64748b"}}>
           {log.slice().reverse().map((l,i)=>{
@@ -333,6 +403,114 @@ function PersonCard({ title, color, amount, person, data, selKey, sync }){
             );
           })}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── ENGEL PAYMENTS SECTION ────────────────────────────────────
+function EngelPaymentsSection({ data, sync }){
+  const shalom = data.shalom || {balance:0};
+  const zamba  = data.zamba  || {balance:0};
+  const paymentsObj = data.payments || {};
+  const payList = Object.values(paymentsObj).sort((a,b)=>a.ts-b.ts);
+  const combined = (shalom.balance||0)+(zamba.balance||0);
+
+  const [addAmt, setAddAmt]   = useState("");
+  const [addTime, setAddTime] = useState(nowLocalInput());
+  const [editKey, setEditKey] = useState(null);
+  const [editAmt, setEditAmt] = useState("");
+
+  const distribute = (amount) => {
+    const sh = shalom.balance||0;
+    const za = zamba.balance||0;
+    const fromSh = Math.min(amount, sh);
+    const fromZa = Math.min(amount-fromSh, za);
+    return { newShalom: sh-fromSh, newZamba: za-fromZa };
+  };
+
+  const addPayment = () => {
+    const v = Number(addAmt);
+    if(!v||v<=0) return;
+    const ts = addTime ? new Date(addTime).getTime() : Date.now();
+    const key = String(ts);
+    const { newShalom, newZamba } = distribute(v);
+    sync(()=>{
+      fbSet(`melavim/engel/payments/${key}`, {ts, amount:v});
+      fbSet(`melavim/engel/shalom/balance`, newShalom);
+      fbSet(`melavim/engel/zamba/balance`,  newZamba);
+    });
+    setAddAmt("");
+    setAddTime(nowLocalInput());
+  };
+
+  const deletePayment = (key, amount) => {
+    sync(()=>{
+      fbSet(`melavim/engel/payments/${key}`, null);
+      fbSet(`melavim/engel/shalom/balance`, (shalom.balance||0)+amount);
+    });
+  };
+
+  const saveEdit = (originalAmount) => {
+    const newAmt = Number(editAmt);
+    if(newAmt<=0){ setEditKey(null); return; }
+    const diff = newAmt - originalAmount;
+    let newShalom = shalom.balance||0;
+    let newZamba  = zamba.balance||0;
+    if(diff>0){
+      const fromSh = Math.min(diff, newShalom);
+      const fromZa = Math.min(diff-fromSh, newZamba);
+      newShalom -= fromSh; newZamba -= fromZa;
+    } else if(diff<0){
+      newShalom += Math.abs(diff);
+    }
+    sync(()=>{
+      fbSet(`melavim/engel/payments/${editKey}`, {ts:Number(editKey), amount:newAmt});
+      fbSet(`melavim/engel/shalom/balance`, Math.max(0,newShalom));
+      fbSet(`melavim/engel/zamba/balance`,  Math.max(0,newZamba));
+    });
+    setEditKey(null);
+  };
+
+  return (
+    <div style={{...card,borderRight:"4px solid #22c55e"}}>
+      <div style={{fontWeight:700,fontSize:14,marginBottom:6}}>💰 תשלומים שהתקבלו מאנגל</div>
+      <div style={{fontSize:12,color:"#64748b",marginBottom:10}}>
+        יתרה לגבייה:&nbsp;
+        <strong style={{color:combined>0?"#dc2626":"#16a34a"}}>{fmt(combined)} ₪</strong>
+        <span style={{fontSize:11,color:"#94a3b8",marginRight:6}}>(שלום: {fmt(shalom.balance||0)} + זמבא: {fmt(zamba.balance||0)})</span>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+        <input style={{...iinp,flex:"1 1 80px",minWidth:80}} type="number" placeholder="סכום שהתקבל" value={addAmt} onChange={e=>setAddAmt(e.target.value)} />
+        <input style={{...iinp,flex:"2 1 130px",minWidth:130}} type="datetime-local" value={addTime} onChange={e=>setAddTime(e.target.value)} />
+        <button style={{...bigBtn,padding:"8px 14px",fontSize:13,flex:"0 0 auto"}} onClick={addPayment}>➕ הוסף</button>
+      </div>
+      {payList.length>0 ? (
+        <div style={{maxHeight:160,overflowY:"auto"}}>
+          {[...payList].reverse().map(p=>{
+            const key = String(p.ts);
+            return (
+              <div key={key} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 0",borderBottom:"1px solid #f1f5f9",fontSize:12}}>
+                <span style={{color:"#64748b",flex:1}}>{fmtDateTime(p.ts)}</span>
+                {editKey===key ? (
+                  <>
+                    <input style={{...iinp,width:80,fontSize:12,padding:"2px 4px"}} type="number" value={editAmt} onChange={e=>setEditAmt(e.target.value)} autoFocus />
+                    <button style={{...smallBtn,padding:"2px 8px",fontSize:11}} onClick={()=>saveEdit(p.amount)}>✔</button>
+                    <button style={{...smallBtn,padding:"2px 8px",fontSize:11}} onClick={()=>setEditKey(null)}>✕</button>
+                  </>
+                ) : (
+                  <>
+                    <span style={{fontWeight:700,color:"#16a34a"}}>{fmt(p.amount)} ₪</span>
+                    <button style={{...smallBtn,padding:"2px 7px",fontSize:11}} onClick={()=>{setEditKey(key);setEditAmt(String(p.amount));}}>✏️</button>
+                    <button style={delBtn} onClick={()=>deletePayment(key,p.amount)}>✕</button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={empty}>אין תשלומים שהוזנו עדיין</div>
       )}
     </div>
   );
@@ -445,7 +623,7 @@ function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
   return (
     <div style={col}>
       <div style={bigCard}>
-        <div style={{fontSize:13,opacity:.75,marginBottom:4}}>סה״כ לשלוח לאנגל</div>
+        <div style={{fontSize:13,opacity:.75,marginBottom:4}}>סה״כ לגבות מאנגל</div>
         <div style={{fontSize:42,fontWeight:800}}>{fmt(combined)} ₪</div>
         <div style={{display:"flex",gap:7,marginTop:10,flexWrap:"wrap"}}>
           <Chip label="שלום" val={fmt(shalom.balance||0)+" ₪"} />
@@ -455,6 +633,8 @@ function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
 
       <PersonCard title="שלום" color="#2563eb" amount={100} person="shalom" data={data} selKey={selKey} sync={sync} />
       <PersonCard title="זמבא" color="#7c3aed" amount={80}  person="zamba"  data={data} selKey={selKey} sync={sync} />
+
+      <EngelPaymentsSection data={data} sync={sync} />
 
       <div style={card}>
         <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>📲 שליחת סיכום לאנגל</div>
