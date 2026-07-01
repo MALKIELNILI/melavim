@@ -133,7 +133,7 @@ function App(){
       </header>
 
       <main style={{maxWidth:520,margin:"0 auto",padding:"12px 14px"}}>
-        {tab==="shmulik" && <ShmulikTab data={shmulik} selKey={selKey} selLabel={selLabel} sync={sync} phone={phones.shmulik} setPhone={v=>setPhone("shmulik",v)}/>}
+        {tab==="shmulik" && <ShmulikTab data={shmulik} sync={sync} phone={phones.shmulik} setPhone={v=>setPhone("shmulik",v)}/>}
         {tab==="engel"   && <EngelTab   data={engel}   selKey={selKey} selLabel={selLabel} sync={sync} phone={phones.engel} setPhone={v=>setPhone("engel",v)}/>}
       </main>
     </div>
@@ -143,7 +143,19 @@ function App(){
 // ── SHMULIK TAB ────────────────────────────────────────────────
 const SHMULIK_TYPES = {morning:{icon:"🌅",label:"בוקר"}, afternoon:{icon:"🌞",label:"צהריים"}};
 
-function ShmulikTab({ data, selKey, selLabel, sync, phone, setPhone }){
+function ShmulikTab({ data, sync, phone, setPhone }){
+  const todayKey = mkMonthKey(now.getFullYear(), now.getMonth());
+  const [selKey, setSelKey] = useState(todayKey);
+  const [ky, km] = selKey.split('-').map(Number);
+  const selLabel = mkMonthLabel(ky, km-1);
+  const isCurrentMonth = selKey === todayKey;
+
+  const navMonth = (delta) => {
+    let y=ky, m=km-1+delta;
+    if(m<0){y--;m+=12;} if(m>11){y++;m-=12;}
+    setSelKey(mkMonthKey(y,m));
+  };
+
   const cur   = data[selKey] || {};
   const log   = cur.log || [];
   const clicks= cur.log ? cur.log.length : (cur.clicks||0);
@@ -198,6 +210,13 @@ function ShmulikTab({ data, selKey, selLabel, sync, phone, setPhone }){
 
   return (
     <div style={col}>
+      {/* ניווט חודשים */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#fff",borderRadius:10,padding:"8px 12px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
+        <button style={smallBtn} onClick={()=>navMonth(-1)}>→ קודם</button>
+        <span style={{fontWeight:700,fontSize:15,color:"#1e3a5f"}}>{selLabel}{isCurrentMonth&&<span style={{fontSize:11,color:"#22c55e",marginRight:6}}> ● נוכחי</span>}</span>
+        <button style={{...smallBtn,opacity:isCurrentMonth?0.4:1}} disabled={isCurrentMonth} onClick={()=>navMonth(1)}>הבא ←</button>
+      </div>
+
       <div style={bigCard}>
         <div style={{fontSize:13,opacity:.75,marginBottom:4}}>{selLabel} — יתרה לגבייה</div>
         <div style={{fontSize:42,fontWeight:800}}>{fmt(Math.max(0,remaining))} ₪</div>
