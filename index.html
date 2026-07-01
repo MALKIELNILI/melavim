@@ -235,7 +235,7 @@ function ShmulikTab({ data, selKey, selLabel, sync, phone, setPhone }){
         </div>
       )}
 
-      <ShmulikPaymentsSection data={data} selKey={selKey} selLabel={selLabel} sync={sync} />
+      <ShmulikPaymentsSection data={data} selKey={selKey} selLabel={selLabel} sync={sync} total={total} remaining={remaining} phone={phoneInput} />
 
       <div style={card}>
         <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>📲 שליחת סיכום לשמוליק</div>
@@ -274,7 +274,7 @@ function ShmulikTab({ data, selKey, selLabel, sync, phone, setPhone }){
 }
 
 // ── SHMULIK PAYMENTS SECTION ──────────────────────────────────
-function ShmulikPaymentsSection({ data, selKey, selLabel, sync }){
+function ShmulikPaymentsSection({ data, selKey, selLabel, sync, total, remaining, phone }){
   const cur = data[selKey] || {};
   const paymentsObj = cur.payments || {};
   const payList = Object.values(paymentsObj).sort((a,b)=>a.ts-b.ts);
@@ -284,14 +284,22 @@ function ShmulikPaymentsSection({ data, selKey, selLabel, sync }){
   const [editKey, setEditKey] = useState(null);
   const [editAmt, setEditAmt] = useState("");
 
-  const addPayment = () => {
-    const v = Number(addAmt);
+  const addPayment = (overrideAmt) => {
+    const v = Number(overrideAmt ?? addAmt);
     if(!v || v<=0) return;
     const ts = addTime ? new Date(addTime).getTime() : Date.now();
     const key = String(ts);
     sync(()=>fbSet(`melavim/shmulik/months/${selKey}/payments/${key}`, {ts, amount:v}));
     setAddAmt("");
     setAddTime(nowLocalInput());
+  };
+
+  const sendPaymentWA = (amount) => {
+    const prevPaid = Object.values(paymentsObj).reduce((s,p)=>s+(p.amount||0),0);
+    const newTotal = prevPaid + amount;
+    const newRemaining = Math.max(0, total - newTotal);
+    const text = `שלום שמוליק! 👋\nשילמתי לך *${fmt(amount)} ₪* עבור ${selLabel}.\n\nסה״כ חויב: ${fmt(total)} ₪\nשולם עד כה: ${fmt(newTotal)} ₪${newRemaining>0?`\nנשאר לשלם: ${fmt(newRemaining)} ₪`:`\n✅ שולם במלואו!`}\n\n🙏 תודה!`;
+    window.open(waLink(phone, text), "_blank");
   };
 
   const deletePayment = key => {
@@ -308,12 +316,43 @@ function ShmulikPaymentsSection({ data, selKey, selLabel, sync }){
 
   return (
     <div style={{...card,borderRight:"4px solid #22c55e"}}>
-      <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>💰 תשלומים שהתקבלו — {selLabel}</div>
+      <div style={{fontWeight:700,fontSize:14,marginBottom:10}}>💰 תשלום לשמוליק — {selLabel}</div>
+
+      {/* כפתור שלם הכל */}
+      {remaining>0 && (
+        <div style={{marginBottom:10}}>
+          <button style={{...bigBtn,width:"100%",background:"#16a34a",fontSize:15,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px"}}
+            onClick={()=>addPayment(remaining)}>
+            <span>✅ שלם הכל</span>
+            <span>{fmt(remaining)} ₪</span>
+          </button>
+        </div>
+      )}
+      {remaining<=0 && <div style={{textAlign:"center",color:"#16a34a",fontWeight:700,fontSize:13,marginBottom:10}}>✔ שולם במלואו</div>}
+
+      {/* הזנת סכום חופשי */}
+      <div style={{fontSize:12,color:"#64748b",marginBottom:6,fontWeight:600}}>או הזן סכום אחר:</div>
       <div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
-        <input style={{...iinp,flex:"1 1 80px",minWidth:80}} type="number" placeholder="סכום שהתקבל" value={addAmt} onChange={e=>setAddAmt(e.target.value)} />
+        <input style={{...iinp,flex:"1 1 80px",minWidth:80}} type="number" placeholder="סכום" value={addAmt} onChange={e=>setAddAmt(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&addPayment()} />
         <input style={{...iinp,flex:"2 1 130px",minWidth:130}} type="datetime-local" value={addTime} onChange={e=>setAddTime(e.target.value)} />
-        <button style={{...bigBtn,padding:"8px 14px",fontSize:13,flex:"0 0 auto"}} onClick={addPayment}>➕ הוסף</button>
+        <button style={{...bigBtn,padding:"8px 14px",fontSize:13,flex:"0 0 auto",opacity:addAmt?1:0.5}}
+          disabled={!addAmt} onClick={()=>addPayment()}>➕ הוסף</button>
       </div>
+
+      {/* שליחת ווטסאפ על תשלום */}
+      {phone && Number(addAmt)>0 && (
+        <button style={{...bigBtn,width:"100%",background:"#25D366",fontSize:13,marginBottom:8}}
+          onClick={()=>{ addPayment(); sendPaymentWA(Number(addAmt)); }}>
+          📤 שלם + שלח אישור בוואטסאפ ({fmt(addAmt)} ₪)
+        </button>
+      )}
+      {phone && remaining>0 && (
+        <button style={{...bigBtn,width:"100%",background:"#25D366",fontSize:13,marginBottom:8}}
+          onClick={()=>{ addPayment(remaining); sendPaymentWA(remaining); }}>
+          📤 שלם הכל + שלח אישור ({fmt(remaining)} ₪)
+        </button>
+      )}
       {payList.length>0 ? (
         <div style={{maxHeight:160,overflowY:"auto"}}>
           {[...payList].reverse().map(p=>{
