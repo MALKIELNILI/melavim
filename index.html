@@ -118,11 +118,12 @@ function buildAttendanceWorkbook(reportKey, monthKey, daysArr, daysInMonth) {
   rows[6] = ["","","","","","",""];
   rows[7] = ["","","","","","",""];
   rows[8] = ["תאריך","הערות","סה\"כ שעות","","תאריך","הערות","סה\"כ שעות"];
+  let sum1=0, sum2=0;
   for (let k=0; k<16; k++) {
     const d1 = k+1, d2 = 17+k;
     const row = ["","","","","","",""];
-    if (d1 <= daysInMonth) { const dd=daysArr[d1]; row[0]=dd.dateStr; row[1]=dd.note; row[2]=dd.hours; }
-    if (d2 <= daysInMonth) { const dd=daysArr[d2]; row[4]=dd.dateStr; row[5]=dd.note; row[6]=dd.hours; }
+    if (d1 <= daysInMonth) { const dd=daysArr[d1]; row[0]=dd.dateStr; row[1]=dd.note; row[2]=dd.hours; sum1+=Number(dd.hours||0); }
+    if (d2 <= daysInMonth) { const dd=daysArr[d2]; row[4]=dd.dateStr; row[5]=dd.note; row[6]=dd.hours; sum2+=Number(dd.hours||0); }
     rows[9+k] = row;
   }
   rows[25] = ["","","","סה\"כ שעות","","",""];
@@ -135,9 +136,10 @@ function buildAttendanceWorkbook(reportKey, monthKey, daysArr, daysInMonth) {
   rows[32] = ["","",`${person.פרטי} ${person.משפחה}`,"מאשר","","",""];
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["C26"] = { t:"n", f:"SUM(C10:C25)" };
-  ws["G26"] = { t:"n", f:"SUM(G10:G25)" };
-  ws["A27"] = { t:"n", f:"C26+G26" };
+  // חייב לכלול גם v (ערך מחושב) - בלי זה SheetJS משמיט את התא בשקט בזמן הכתיבה
+  ws["C26"] = { t:"n", v:sum1, f:"SUM(C10:C25)" };
+  ws["G26"] = { t:"n", v:sum2, f:"SUM(G10:G25)" };
+  ws["A27"] = { t:"n", v:sum1+sum2, f:"C26+G26" };
   ws["!merges"] = [
     { s:{r:6,c:0},  e:{r:6,c:6} },
     { s:{r:26,c:0}, e:{r:26,c:6} },
