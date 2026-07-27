@@ -338,7 +338,26 @@ function ShmulikTab({ data, sync, phone, setPhone }){
   const [chargeTime,setChargeTime] = useState(nowLocalInput());
   const [chargeType,setChargeType] = useState(new Date().getHours()<12?"morning":"afternoon");
   const [phoneInput,setPhoneInput] = useState(phone||"");
+  const [showCal,setShowCal] = useState(false);
   useEffect(()=>{ setPhoneInput(phone||""); },[phone]);
+
+  const getLogForMonth = (y,m) => {
+    const k = mkMonthKey(y,m-1);
+    return (data[k]||{}).log || [];
+  };
+  const handleToggleDay = ({ day, y, m, sameDay }) => {
+    const targetKey = mkMonthKey(y,m-1);
+    const tcur = data[targetKey] || {};
+    const tlog = tcur.log || [];
+    if (sameDay.length>0) {
+      const newLog = tlog.filter(l=>!sameDay.includes(l));
+      sync(()=>fbSet(`melavim/shmulik/months/${targetKey}`, {...tcur, log:newLog, clicks:newLog.length}));
+    } else {
+      const ts = new Date(y,m-1,day,12,0).getTime();
+      const newLog = [...tlog,{ts,type:chargeType}].sort((a,b)=>a.ts-b.ts);
+      sync(()=>fbSet(`melavim/shmulik/months/${targetKey}`, {...tcur, log:newLog, clicks:newLog.length}));
+    }
+  };
 
   const addCharge = () => {
     const d = chargeTime ? new Date(chargeTime) : new Date();
@@ -404,6 +423,9 @@ function ShmulikTab({ data, sync, phone, setPhone }){
       </div>
       <div style={{fontSize:11,color:"#94a3b8"}}>אפשר לשנות את התאריך כדי לרשום חיוב קודם — הוא יתווסף לחודש המתאים</div>
       <button style={{...smallBtn,opacity:clicks>0?1:0.5}} disabled={!clicks} onClick={undoClick}>↩ בטל חיוב אחרון</button>
+
+      <button style={smallBtn} onClick={()=>setShowCal(s=>!s)}>{showCal?"📅 הסתר לוח חודש":"📅 לוח חודש — סימון ימים"}</button>
+      {showCal && <MonthCalendar getLog={getLogForMonth} color="#2563eb" selKey={selKey} onToggleDay={handleToggleDay} />}
 
       {log.length>0 && (
         <div style={card}>
@@ -600,6 +622,17 @@ function PersonCard({ title, color, amount, person, data, selKey, sync }){
     const newLog=log.filter((_,idx)=>idx!==i);
     sync(()=>fbSet(`melavim/engel/${person}`, {balance:Math.max(0,balance-entry.amount), log:newLog}));
   };
+  const handleToggleDay = ({ day, y, m, sameDay }) => {
+    if (sameDay.length>0) {
+      const removeAmount = sameDay.reduce((s,e)=>s+e.amount,0);
+      const newLog = log.filter(l=>!sameDay.includes(l));
+      sync(()=>fbSet(`melavim/engel/${person}`, {balance:Math.max(0,balance-removeAmount), log:newLog}));
+    } else {
+      const ts = new Date(y,m-1,day,12,0).getTime();
+      const newLog = [...log,{ts,amount}].sort((a,b)=>a.ts-b.ts);
+      sync(()=>fbSet(`melavim/engel/${person}`, {balance:balance+amount, log:newLog}));
+    }
+  };
 
   return (
     <div style={{...card,borderRight:`4px solid ${color}`}}>
@@ -615,7 +648,7 @@ function PersonCard({ title, color, amount, person, data, selKey, sync }){
       <div style={{fontSize:11,color:"#94a3b8",marginBottom:8}}>אפשר לשנות את התאריך כדי לרשום חיוב קודם — הוא יתווסף לסכום הכולל</div>
 
       <button style={{...smallBtn,width:"100%",marginBottom:8}} onClick={()=>setShowCal(s=>!s)}>{showCal?"📅 הסתר לוח חודש":"📅 לוח חודש — סימון ימים"}</button>
-      {showCal && <MonthCalendar log={log} balance={balance} person={person} amount={amount} color={color} selKey={selKey} sync={sync} />}
+      {showCal && <MonthCalendar getLog={()=>log} color={color} selKey={selKey} onToggleDay={handleToggleDay} />}
 
       {log.length>0 && (
         <div style={{marginTop:10,maxHeight:120,overflowY:"auto",fontSize:11,color:"#64748b"}}>
@@ -747,15 +780,18 @@ function EngelPaymentsSection({ data, sync }){
 
 const WEEKDAYS_HE = ["א","ב","ג","ד","ה","ו","ש"];
 
-function MonthCalendar({ log, balance, person, amount, color, selKey, sync }){
+// לוח חודשי גנרי לסימון ימים - הכתיבה בפועל (Firebase) נעשית ע"י onToggleDay שמסופק מבחוץ,
+// כדי שיהיה ניתן לשימוש גם עבור מודל נתונים גלובלי (אנגל) וגם עבור מודל לפי-חודש (שמוליק)
+function MonthCalendar({ getLog, color, selKey, onToggleDay }){
   const [viewKey,setViewKey] = useState(selKey);
   const [vy,vm] = viewKey.split("-").map(Number);
   const daysInMonth = new Date(vy,vm,0).getDate();
   const firstDow = new Date(vy,vm-1,1).getDay();
   const today = new Date();
   const isCurMonth = today.getFullYear()===vy && (today.getMonth()+1)===vm;
+  const monthLog = getLog(vy,vm);
   const markedDays = new Set(
-    log.filter(l=>{ const d=new Date(l.ts); return d.getFullYear()===vy && (d.getMonth()+1)===vm; })
+    monthLog.filter(l=>{ const d=new Date(l.ts); return d.getFullYear()===vy && (d.getMonth()+1)===vm; })
        .map(l=>new Date(l.ts).getDate())
   );
 
@@ -767,19 +803,11 @@ function MonthCalendar({ log, balance, person, amount, color, selKey, sync }){
   };
 
   const toggleDay = (day) => {
-    const sameDay = log.filter(l=>{
+    const sameDay = monthLog.filter(l=>{
       const d=new Date(l.ts);
       return d.getFullYear()===vy && (d.getMonth()+1)===vm && d.getDate()===day;
     });
-    if(sameDay.length>0){
-      const removeAmount = sameDay.reduce((s,e)=>s+e.amount,0);
-      const newLog = log.filter(l=>!sameDay.includes(l));
-      sync(()=>fbSet(`melavim/engel/${person}`, {balance:Math.max(0,balance-removeAmount), log:newLog}));
-    } else {
-      const ts = new Date(vy,vm-1,day,12,0).getTime();
-      const newLog = [...log,{ts,amount}].sort((a,b)=>a.ts-b.ts);
-      sync(()=>fbSet(`melavim/engel/${person}`, {balance:balance+amount, log:newLog}));
-    }
+    onToggleDay({ day, y:vy, m:vm, sameDay });
   };
 
   return (
@@ -843,7 +871,7 @@ function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
     body += `\n\nנוכחי: ${fmt(newSum)} ₪`;
     if(prevAmount>0) body += `\nקודם (לא שולם): ${fmt(prevAmount)} ₪`;
 
-    const text = `שלום אנגל! 👋\nסיכום נסיעות:\n\n${body}\n\nשלום: ${fmt(shalom.balance||0)} ₪\nזמבא: ${fmt(zamba.balance||0)} ₪\n\n💰 סה״כ לתשלום (שלום+זמבא): ${fmt(combined)} ₪ 🙏`;
+    const text = `שלום אנגל! 👋\nסיכום נסיעות:\n\n${body}\n\n💰 סה״כ לתשלום: ${fmt(combined)} ₪ 🙏`;
     window.open(waLink(phoneInput,text),"_blank");
     const sentNow = Date.now();
     sync(()=>{ fbSet(`melavim/engel/shalom/lastSentTs`, sentNow); fbSet(`melavim/engel/zamba/lastSentTs`, sentNow); });
