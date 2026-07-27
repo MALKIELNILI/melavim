@@ -25,7 +25,7 @@ if('serviceWorker' in navigator){
 <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
-<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 * { box-sizing:border-box; margin:0; padding:0; }
 body { background:#f1f5f9; font-family:'Segoe UI',Arial,sans-serif; direction:rtl; }
@@ -102,53 +102,119 @@ function buildDaysArr(y, m, overrides) {
   return { arr, daysInMonth };
 }
 
-// בונה קובץ Excel זהה במבנה לקבצי המקור (כולל נוסחאות SUM)
-function buildAttendanceWorkbook(reportKey, monthKey, daysArr, daysInMonth) {
+// ── תבנית ה-Excel (template.xlsx) ────────────────────────────
+// נטענת פעם אחת ונשמרת בזיכרון. בכל הפקה נערכים ישירות רק תאי ה-XML הרלוונטיים
+// (SheetJS החינמית קוראת עיצוב תאים אך לא כותבת אותו בחזרה - נבדק ישירות: round-trip
+// ריק דרך XLSX.write מאבד את כל צביעת הרקע. לכן העריכה כאן היא ברמת ה-XML הגולמי בתוך
+// קובץ ה-zip, כך שהעיצוב המקורי (צבעי רקע, רוחב עמודות) נשאר זהה ב-100% למקור).
+let templateBufferPromise = null;
+function getTemplateBuffer() {
+  if (!templateBufferPromise) templateBufferPromise = fetch('./template.xlsx').then(r => r.arrayBuffer());
+  return templateBufferPromise;
+}
+
+const xmlEscape = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const xmlUnescape = s => String(s).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
+
+function parseSharedStrings(xml) {
+  const list = [];
+  const re = /<si><t(?:\s[^>]*)?>([\s\S]*?)<\/t><\/si>/g;
+  let m;
+  while ((m = re.exec(xml))) list.push(xmlUnescape(m[1]));
+  return list;
+}
+
+// עורך תא בודד בתוך sheet1.xml, תוך שימור מוחלט של אפיון הסגנון (s="N") הקיים על התא
+function setCell(xml, addr, opts) {
+  const re = new RegExp(`<c r="${addr}"([^>]*?)(?:/>|>([\\s\\S]*?)<\\/c>)`);
+  return xml.replace(re, (all, attrs) => {
+    const sMatch = attrs.match(/\ss="(\d+)"/);
+    const sAttr = sMatch ? ` s="${sMatch[1]}"` : "";
+    if (opts.blank) return `<c r="${addr}"${sAttr}/>`;
+    if (opts.formula !== undefined) return `<c r="${addr}"${sAttr}><f>${xmlEscape(opts.formula)}</f><v>${opts.number}</v></c>`;
+    if (opts.sstIndex !== undefined) return `<c r="${addr}"${sAttr} t="s"><v>${opts.sstIndex}</v></c>`;
+    return `<c r="${addr}"${sAttr}><v>${opts.number}</v></c>`;
+  });
+}
+
+// בונה קובץ Excel זהה במבנה ובעיצוב לקבצי המקור (כולל נוסחאות SUM), על בסיס תבנית אמיתית
+async function buildAttendanceWorkbook(reportKey, monthKey, daysArr, daysInMonth) {
   const person = REPORTS[reportKey];
   const [y,m] = monthKey.split("-").map(Number);
   const monthName = MONTHS_HE[m-1];
 
-  const rows = [];
-  rows[0] = ["","","","","","",""]; // שורה 1 ריקה (כמו במקור, שמתחיל בפועל מ-A2)
-  rows[1] = ["","","",`דו"ח נוכחות ופירוט עבודה לחודש ${monthName} בשנת ${y}`,"","",""];
-  rows[2] = ["","","","","","",""];
-  rows[3] = ["שם משפחה","שם פרטי","מספר זהות","סמל פרויקט","שם פרויקט","שם מוסד","שם קו"];
-  rows[4] = [person.משפחה, person.פרטי, person.תז, person.סמל, person.פרויקט, person.מוסד, person.קו];
-  rows[5] = ["","","","","","",""];
-  rows[6] = ["","","","","","",""];
-  rows[7] = ["","","","","","",""];
-  rows[8] = ["תאריך","הערות","סה\"כ שעות","","תאריך","הערות","סה\"כ שעות"];
-  let sum1=0, sum2=0;
-  for (let k=0; k<16; k++) {
-    const d1 = k+1, d2 = 17+k;
-    const row = ["","","","","","",""];
-    if (d1 <= daysInMonth) { const dd=daysArr[d1]; row[0]=dd.dateStr; row[1]=dd.note; row[2]=dd.hours; sum1+=Number(dd.hours||0); }
-    if (d2 <= daysInMonth) { const dd=daysArr[d2]; row[4]=dd.dateStr; row[5]=dd.note; row[6]=dd.hours; sum2+=Number(dd.hours||0); }
-    rows[9+k] = row;
-  }
-  rows[25] = ["","","","סה\"כ שעות","","",""];
-  rows[26] = ["","","","","","",""];
-  rows[27] = ["הערות נוספות:","","","","","",""];
-  rows[28] = ["","","","","","",""];
-  rows[29] = ["","","","","","",""];
-  rows[30] = ["","","","","","",""];
-  rows[31] = ["תאריך","חתימה","שם מלווה","חתימת העובד","חתימת עיריית ת\"א","שם ממונה ע.ת.א","חתימה"];
-  rows[32] = ["","",`${person.פרטי} ${person.משפחה}`,"מאשר","","",""];
+  const buf = await getTemplateBuffer();
+  const zip = await JSZip.loadAsync(buf.slice(0));
 
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  // חייב לכלול גם v (ערך מחושב) - בלי זה SheetJS משמיט את התא בשקט בזמן הכתיבה
-  ws["C26"] = { t:"n", v:sum1, f:"SUM(C10:C25)" };
-  ws["G26"] = { t:"n", v:sum2, f:"SUM(G10:G25)" };
-  ws["A27"] = { t:"n", v:sum1+sum2, f:"C26+G26" };
-  ws["!merges"] = [
-    { s:{r:6,c:0},  e:{r:6,c:6} },
-    { s:{r:26,c:0}, e:{r:26,c:6} },
-    { s:{r:27,c:0}, e:{r:29,c:6} },
-  ];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "דו\"ח נוכחות");
-  const out = XLSX.write(wb, { bookType:"xlsx", type:"array" });
-  return new Blob([out], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  let sst = await zip.file("xl/sharedStrings.xml").async("string");
+  let sheet = await zip.file("xl/worksheets/sheet1.xml").async("string");
+  const sstList = parseSharedStrings(sst);
+  let addedSi = "";
+  let addedCount = 0;
+  const sstIndexOf = (text) => {
+    let idx = sstList.indexOf(text);
+    if (idx === -1) {
+      idx = sstList.length;
+      sstList.push(text);
+      addedSi += `<si><t>${xmlEscape(text)}</t></si>`;
+      addedCount++;
+    }
+    return idx;
+  };
+
+  // כותרת
+  sheet = setCell(sheet, "D2", { sstIndex: sstIndexOf(`דו"ח נוכחות ופירוט עבודה לחודש ${monthName} בשנת ${y}`) });
+
+  // פרטי המלווה
+  sheet = setCell(sheet, "A5", { sstIndex: sstIndexOf(person.משפחה) });
+  sheet = setCell(sheet, "B5", { sstIndex: sstIndexOf(person.פרטי) });
+  sheet = setCell(sheet, "C5", { number: person.תז });
+  sheet = setCell(sheet, "D5", person.סמל ? { number: person.סמל } : { blank:true });
+  sheet = setCell(sheet, "E5", { sstIndex: sstIndexOf(person.פרויקט) });
+  sheet = setCell(sheet, "F5", person.מוסד ? { sstIndex: sstIndexOf(person.מוסד) } : { blank:true });
+  sheet = setCell(sheet, "G5", person.קו ? { sstIndex: sstIndexOf(person.קו) } : { blank:true });
+
+  // טבלת ימים
+  let sum1 = 0, sum2 = 0;
+  for (let k = 0; k < 16; k++) {
+    const row = 10 + k;
+    const d1 = k + 1, d2 = 17 + k;
+    if (d1 <= daysInMonth) {
+      const dd = daysArr[d1];
+      sheet = setCell(sheet, `A${row}`, { sstIndex: sstIndexOf(dd.dateStr) });
+      sheet = setCell(sheet, `B${row}`, dd.note ? { sstIndex: sstIndexOf(dd.note) } : { blank:true });
+      sheet = setCell(sheet, `C${row}`, { number: Number(dd.hours||0) });
+      sum1 += Number(dd.hours||0);
+    }
+    if (d2 <= daysInMonth) {
+      const dd = daysArr[d2];
+      sheet = setCell(sheet, `E${row}`, { sstIndex: sstIndexOf(dd.dateStr) });
+      sheet = setCell(sheet, `F${row}`, dd.note ? { sstIndex: sstIndexOf(dd.note) } : { blank:true });
+      sheet = setCell(sheet, `G${row}`, { number: Number(dd.hours||0) });
+      sum2 += Number(dd.hours||0);
+    } else {
+      sheet = setCell(sheet, `E${row}`, { blank:true });
+      sheet = setCell(sheet, `F${row}`, { blank:true });
+      sheet = setCell(sheet, `G${row}`, { blank:true });
+    }
+  }
+
+  // סיכומים (הנוסחאות המקוריות נשמרות, רק הערך המחושב מתעדכן)
+  sheet = setCell(sheet, "C26", { formula: "SUM(C10:C25)", number: sum1 });
+  sheet = setCell(sheet, "G26", { formula: "SUM(G10:G25)", number: sum2 });
+  sheet = setCell(sheet, "A27", { formula: "C26+G26", number: sum1 + sum2 });
+
+  // חתימה
+  sheet = setCell(sheet, "C33", { sstIndex: sstIndexOf(`${person.פרטי} ${person.משפחה}`) });
+
+  sst = sst.replace("</sst>", addedSi + "</sst>");
+  sst = sst.replace(/count="(\d+)" uniqueCount="(\d+)"/, (all, c, u) =>
+    `count="${Number(c) + addedCount}" uniqueCount="${Number(u) + addedCount}"`);
+
+  zip.file("xl/sharedStrings.xml", sst);
+  zip.file("xl/worksheets/sheet1.xml", sheet);
+
+  return await zip.generateAsync({ type:"blob", compression:"DEFLATE", mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 }
 
 // משתף את הקובץ ישירות (לוואטסאפ וכו') דרך Web Share API; נופל חזרה להורדה רגילה אם לא נתמך
@@ -157,15 +223,19 @@ async function shareOrDownloadFile(blob, filename) {
     const file = new File([blob], filename, { type: blob.type });
     if (navigator.canShare && navigator.canShare({ files:[file] })) {
       await navigator.share({ files:[file], title: filename });
-      return "shared";
+      return { status:"shared" };
     }
-  } catch(e) { if (e && e.name === "AbortError") return "cancelled"; }
+    console.log("[מלווים] שיתוף קבצים לא נתמך בדפדפן זה (canShare=false או navigator.share לא קיים)");
+  } catch(e) {
+    if (e && e.name === "AbortError") return { status:"cancelled" };
+    console.error("[מלווים] שיתוף נכשל:", e && e.name, e && e.message);
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(()=>URL.revokeObjectURL(url), 5000);
-  return "downloaded";
+  return { status:"downloaded" };
 }
 
 // ── FIREBASE HELPERS ─────────────────────────────────────────
@@ -814,6 +884,8 @@ function YanivTab({ data, sync, phone, setPhone }){
   const [phoneInput, setPhoneInput] = useState(phone||"");
   useEffect(()=>{ setPhoneInput(phone||""); },[phone]);
   const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState("");
+  useEffect(()=>{ getTemplateBuffer(); },[]); // חימום מראש של תבנית ה-Excel
 
   const navMonth = (delta) => {
     let y=ky, m=km-1+delta;
@@ -845,13 +917,19 @@ function YanivTab({ data, sync, phone, setPhone }){
 
   const handleSend = async () => {
     setSending(true);
+    setSendMsg("");
     try {
-      const blob = buildAttendanceWorkbook(reportKey, selKey, daysArr, daysInMonth);
+      const blob = await buildAttendanceWorkbook(reportKey, selKey, daysArr, daysInMonth);
       const filename = `נכחות ${person.label} - ${selLabel}.xlsx`;
-      const result = await shareOrDownloadFile(blob, filename);
-      if (result !== "cancelled") {
+      const { status } = await shareOrDownloadFile(blob, filename);
+      if (status === "shared") setSendMsg("✅ שותף בהצלחה");
+      else if (status === "downloaded") setSendMsg("📥 הקובץ ירד למכשיר — שיתוף ישיר לוואטסאפ לא נתמך בדפדפן זה. אפשר לפתוח את ההורדות ולשתף משם ידנית.");
+      if (status !== "cancelled") {
         sync(()=>fbSet(`melavim/attendance/${reportKey}/${selKey}/lastSentTs`, Date.now()));
       }
+    } catch(e) {
+      console.error("[מלווים] הפקת הקובץ נכשלה:", e);
+      setSendMsg("❌ שגיאה בהפקת הקובץ, נסה שוב");
     } finally {
       setSending(false);
     }
@@ -909,6 +987,7 @@ function YanivTab({ data, sync, phone, setPhone }){
         <button style={{...bigBtn,width:"100%",background:"#25D366"}} disabled={sending} onClick={handleSend}>
           {sending ? "מכין קובץ..." : `📥 הפק ושתף - ${person.label}`}
         </button>
+        {sendMsg && <div style={{fontSize:12,marginTop:8,color:"#475569",lineHeight:1.5}}>{sendMsg}</div>}
       </div>
     </div>
   );
