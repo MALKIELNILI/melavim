@@ -25,6 +25,7 @@ if('serviceWorker' in navigator){
 <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 * { box-sizing:border-box; margin:0; padding:0; }
 body { background:#f1f5f9; font-family:'Segoe UI',Arial,sans-serif; direction:rtl; }
@@ -70,6 +71,100 @@ const toIntlPhone = p => {
   return d;
 };
 const waLink = (phone,text) => `https://wa.me/${toIntlPhone(phone)}?text=${encodeURIComponent(text)}`;
+const pad2 = n => String(n).padStart(2,'0');
+
+// ── דוחות נוכחות ליניב ──────────────────────────────────────
+// פרטי המלווים הקבועים לדו"ח (כפי שמופיעים בקבצי המקור המקוריים)
+const REPORTS = {
+  elchanan: { label:"אלחנן", משפחה:"יצחקוב", פרטי:"אלחנן", תז:"212294813", סמל:"",    פרויקט:"בני ברק", מוסד:"",     קו:"" },
+  zamba:    { label:"זמבא",  משפחה:"יצחקוב", פרטי:"מלכיאל", תז:"303636153", סמל:"275", פרויקט:"בני ברק", מוסד:"זמבא", קו:"" },
+};
+
+// יום ברירת מחדל: 6 שעות, חוץ משבת = 0. שישי מסומן בהערה אבל עדיין 6 שעות.
+function defaultDayInfo(y, m, day) {
+  const dow = new Date(y, m-1, day).getDay(); // 0=ראשון...6=שבת
+  const isSat = dow === 6, isFri = dow === 5;
+  return { note: isFri ? "שישי" : isSat ? "שבת" : "", hours: isSat ? 0 : 6 };
+}
+function buildDaysArr(y, m, overrides) {
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const arr = {};
+  for (let d=1; d<=daysInMonth; d++) {
+    const def = defaultDayInfo(y, m, d);
+    const ov = (overrides||{})[d];
+    arr[d] = {
+      dateStr: `${pad2(d)}/${pad2(m)}/${y}`,
+      note: ov ? (ov.note ?? def.note) : def.note,
+      hours: ov ? Number(ov.hours ?? def.hours) : def.hours,
+      overridden: !!ov,
+    };
+  }
+  return { arr, daysInMonth };
+}
+
+// בונה קובץ Excel זהה במבנה לקבצי המקור (כולל נוסחאות SUM)
+function buildAttendanceWorkbook(reportKey, monthKey, daysArr, daysInMonth) {
+  const person = REPORTS[reportKey];
+  const [y,m] = monthKey.split("-").map(Number);
+  const monthName = MONTHS_HE[m-1];
+
+  const rows = [];
+  rows[0] = ["","","","","","",""]; // שורה 1 ריקה (כמו במקור, שמתחיל בפועל מ-A2)
+  rows[1] = ["","","",`דו"ח נוכחות ופירוט עבודה לחודש ${monthName} בשנת ${y}`,"","",""];
+  rows[2] = ["","","","","","",""];
+  rows[3] = ["שם משפחה","שם פרטי","מספר זהות","סמל פרויקט","שם פרויקט","שם מוסד","שם קו"];
+  rows[4] = [person.משפחה, person.פרטי, person.תז, person.סמל, person.פרויקט, person.מוסד, person.קו];
+  rows[5] = ["","","","","","",""];
+  rows[6] = ["","","","","","",""];
+  rows[7] = ["","","","","","",""];
+  rows[8] = ["תאריך","הערות","סה\"כ שעות","","תאריך","הערות","סה\"כ שעות"];
+  for (let k=0; k<16; k++) {
+    const d1 = k+1, d2 = 17+k;
+    const row = ["","","","","","",""];
+    if (d1 <= daysInMonth) { const dd=daysArr[d1]; row[0]=dd.dateStr; row[1]=dd.note; row[2]=dd.hours; }
+    if (d2 <= daysInMonth) { const dd=daysArr[d2]; row[4]=dd.dateStr; row[5]=dd.note; row[6]=dd.hours; }
+    rows[9+k] = row;
+  }
+  rows[25] = ["","","","סה\"כ שעות","","",""];
+  rows[26] = ["","","","","","",""];
+  rows[27] = ["הערות נוספות:","","","","","",""];
+  rows[28] = ["","","","","","",""];
+  rows[29] = ["","","","","","",""];
+  rows[30] = ["","","","","","",""];
+  rows[31] = ["תאריך","חתימה","שם מלווה","חתימת העובד","חתימת עיריית ת\"א","שם ממונה ע.ת.א","חתימה"];
+  rows[32] = ["","",`${person.פרטי} ${person.משפחה}`,"מאשר","","",""];
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["C26"] = { t:"n", f:"SUM(C10:C25)" };
+  ws["G26"] = { t:"n", f:"SUM(G10:G25)" };
+  ws["A27"] = { t:"n", f:"C26+G26" };
+  ws["!merges"] = [
+    { s:{r:6,c:0},  e:{r:6,c:6} },
+    { s:{r:26,c:0}, e:{r:26,c:6} },
+    { s:{r:27,c:0}, e:{r:29,c:6} },
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "דו\"ח נוכחות");
+  const out = XLSX.write(wb, { bookType:"xlsx", type:"array" });
+  return new Blob([out], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+
+// משתף את הקובץ ישירות (לוואטסאפ וכו') דרך Web Share API; נופל חזרה להורדה רגילה אם לא נתמך
+async function shareOrDownloadFile(blob, filename) {
+  try {
+    const file = new File([blob], filename, { type: blob.type });
+    if (navigator.canShare && navigator.canShare({ files:[file] })) {
+      await navigator.share({ files:[file], title: filename });
+      return "shared";
+    }
+  } catch(e) { if (e && e.name === "AbortError") return "cancelled"; }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 5000);
+  return "downloaded";
+}
 
 // ── FIREBASE HELPERS ─────────────────────────────────────────
 function fbSet(path,val){ db.ref(path).set(val); }
@@ -87,14 +182,16 @@ function App(){
   const [shmulik,setShmulik] = useState({});
   const [engel,setEngel]     = useState({});
   const [phones,setPhones]   = useState({});
+  const [attendance,setAttendance] = useState({});
 
   useEffect(()=>{
-    let loaded={sh:false,en:false,ph:false};
-    const check=()=>{ if(loaded.sh&&loaded.en&&loaded.ph) setReady(true); };
+    let loaded={sh:false,en:false,ph:false,at:false};
+    const check=()=>{ if(loaded.sh&&loaded.en&&loaded.ph&&loaded.at) setReady(true); };
     const u1=fbListen("melavim/shmulik/months",v=>{ setShmulik(v||{}); loaded.sh=true; check(); });
     const u2=fbListen("melavim/engel",          v=>{ setEngel(v||{});   loaded.en=true; check(); });
     const u3=fbListen("melavim/phones",         v=>{ setPhones(v||{}); loaded.ph=true; check(); });
-    return ()=>{u1();u2();u3();};
+    const u4=fbListen("melavim/attendance",     v=>{ setAttendance(v||{}); loaded.at=true; check(); });
+    return ()=>{u1();u2();u3();u4();};
   },[]);
 
   const sync = fn => { setSyncing(true); fn(); setTimeout(()=>setSyncing(false),900); };
@@ -128,6 +225,7 @@ function App(){
           <div style={{display:"flex",gap:6}}>
             <button onClick={()=>setTab("shmulik")} style={tabS("shmulik")}>👤 שמוליק</button>
             <button onClick={()=>setTab("engel")}   style={tabS("engel")}>👥 אנגל</button>
+            <button onClick={()=>setTab("yaniv")}   style={tabS("yaniv")}>📋 יניב</button>
           </div>
         </div>
       </header>
@@ -135,6 +233,7 @@ function App(){
       <main style={{maxWidth:520,margin:"0 auto",padding:"12px 14px"}}>
         {tab==="shmulik" && <ShmulikTab data={shmulik} sync={sync} phone={phones.shmulik} setPhone={v=>setPhone("shmulik",v)}/>}
         {tab==="engel"   && <EngelTab   data={engel}   selKey={selKey} selLabel={selLabel} sync={sync} phone={phones.engel} setPhone={v=>setPhone("engel",v)}/>}
+        {tab==="yaniv"   && <YanivTab   data={attendance} sync={sync} phone={phones.yaniv} setPhone={v=>setPhone("yaniv",v)}/>}
       </main>
     </div>
   );
@@ -698,6 +797,116 @@ function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
         <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>📲 שליחת סיכום לאנגל</div>
         <input style={{...iinp,width:"100%",marginBottom:8}} type="tel" placeholder="מספר טלפון (לדוגמה 0501234567)" value={phoneInput} onChange={e=>{setPhoneInput(e.target.value); setPhone(e.target.value);}} />
         <button style={{...bigBtn,width:"100%",background:"#25D366",opacity:combined?1:0.5}} disabled={!combined} onClick={sendSummary}>📤 שלח סיכום בוואטסאפ</button>
+      </div>
+    </div>
+  );
+}
+
+// ── YANIV TAB — דוחות נוכחות חודשיים ──────────────────────────
+function YanivTab({ data, sync, phone, setPhone }){
+  const [reportKey, setReportKey] = useState("elchanan");
+  const todayKey = mkMonthKey(now.getFullYear(), now.getMonth());
+  const [selKey, setSelKey] = useState(todayKey);
+  const [ky, km] = selKey.split("-").map(Number);
+  const selLabel = mkMonthLabel(ky, km-1);
+  const [phoneInput, setPhoneInput] = useState(phone||"");
+  useEffect(()=>{ setPhoneInput(phone||""); },[phone]);
+  const [sending, setSending] = useState(false);
+
+  const navMonth = (delta) => {
+    let y=ky, m=km-1+delta;
+    if(m<0){y--;m+=12;} if(m>11){y++;m-=12;}
+    setSelKey(mkMonthKey(y,m));
+  };
+
+  const person = REPORTS[reportKey];
+  const reportData = (data[reportKey]||{})[selKey] || {};
+  const overrides = reportData.days || {};
+  const lastSentTs = reportData.lastSentTs || 0;
+  const { arr: daysArr, daysInMonth } = buildDaysArr(ky, km, overrides);
+  const totalHours = Object.values(daysArr).reduce((s,d)=>s+Number(d.hours||0),0);
+
+  const setDay = (day, patch) => {
+    const d = daysArr[day];
+    const next = { note: d.note, hours: d.hours, ...patch };
+    sync(()=>fbSet(`melavim/attendance/${reportKey}/${selKey}/days/${day}`, next));
+  };
+  const resetDay = (day) => {
+    sync(()=>fbSet(`melavim/attendance/${reportKey}/${selKey}/days/${day}`, null));
+  };
+  const markVacation = (day) => setDay(day, { hours:0, note:"חופשה" });
+
+  const dowLabel = (day) => {
+    const dow = new Date(ky, km-1, day).getDay();
+    return ["א","ב","ג","ד","ה","ו","ש"][dow];
+  };
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      const blob = buildAttendanceWorkbook(reportKey, selKey, daysArr, daysInMonth);
+      const filename = `נכחות ${person.label} - ${selLabel}.xlsx`;
+      const result = await shareOrDownloadFile(blob, filename);
+      if (result !== "cancelled") {
+        sync(()=>fbSet(`melavim/attendance/${reportKey}/${selKey}/lastSentTs`, Date.now()));
+      }
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div style={col}>
+      {/* בחירת מלווה */}
+      <div style={{display:"flex",gap:8}}>
+        {Object.entries(REPORTS).map(([key,p])=>(
+          <button key={key} onClick={()=>setReportKey(key)}
+            style={{flex:1,padding:"10px 0",borderRadius:8,border:reportKey===key?"2px solid #1e3a5f":"1px solid #e2e8f0",background:reportKey===key?"#1e3a5f":"#f8fafc",color:reportKey===key?"#fff":"#64748b",fontWeight:700,fontSize:14,cursor:"pointer"}}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ניווט חודשים */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#fff",borderRadius:10,padding:"8px 12px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
+        <button style={smallBtn} onClick={()=>navMonth(-1)}>→ קודם</button>
+        <span style={{fontWeight:700,fontSize:15,color:"#1e3a5f"}}>{selLabel}</span>
+        <button style={smallBtn} onClick={()=>navMonth(1)}>הבא ←</button>
+      </div>
+
+      <div style={bigCard}>
+        <div style={{fontSize:13,opacity:.75,marginBottom:4}}>{person.label} — {selLabel}</div>
+        <div style={{fontSize:42,fontWeight:800}}>{fmt(totalHours)} שעות</div>
+        <div style={{fontSize:12,opacity:.7,marginTop:4}}>{person.פרטי} {person.משפחה} · ת.ז {person.תז} · {person.פרויקט}</div>
+        {lastSentTs>0 && <div style={{fontSize:11,opacity:.65,marginTop:6}}>✅ נשלח לאחרונה: {fmtDateTime(lastSentTs)}</div>}
+      </div>
+
+      <div style={card}>
+        <div style={{fontWeight:700,fontSize:14,marginBottom:10}}>📅 ימי החודש — לחיצה לעריכה</div>
+        <div style={{maxHeight:360,overflowY:"auto"}}>
+          {Array.from({length:daysInMonth},(_,i)=>i+1).map(day=>{
+            const d = daysArr[day];
+            return (
+              <div key={day} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 0",borderBottom:"1px solid #f1f5f9"}}>
+                <span style={{width:70,fontSize:12,color:"#64748b",flexShrink:0}}>{d.dateStr.slice(0,5)} ({dowLabel(day)})</span>
+                <input type="number" value={d.hours} onChange={e=>setDay(day,{hours:Number(e.target.value)})}
+                  style={{...iinp,width:48,textAlign:"center",padding:"4px 2px"}} />
+                <input type="text" value={d.note} placeholder="הערה" onChange={e=>setDay(day,{note:e.target.value})}
+                  style={{...iinp,flex:1,minWidth:0}} />
+                <button style={{...smallBtn,padding:"3px 8px",fontSize:11,flexShrink:0}} onClick={()=>markVacation(day)}>🏖️</button>
+                {d.overridden && <button style={{...delBtn,flexShrink:0}} title="אפס לברירת מחדל" onClick={()=>resetDay(day)}>↺</button>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={card}>
+        <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>📤 שליחה ליניב</div>
+        <div style={{fontSize:11,color:"#94a3b8",marginBottom:8}}>מפיק קובץ Excel זהה במבנה לדוח הרשמי ומשתף אותו (בנייד — ישירות לוואטסאפ)</div>
+        <button style={{...bigBtn,width:"100%",background:"#25D366"}} disabled={sending} onClick={handleSend}>
+          {sending ? "מכין קובץ..." : `📥 הפק ושתף - ${person.label}`}
+        </button>
       </div>
     </div>
   );
