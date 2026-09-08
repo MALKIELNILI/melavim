@@ -851,21 +851,11 @@ function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
   const [phoneInput,setPhoneInput] = useState(phone||"");
   useEffect(()=>{ setPhoneInput(phone||""); },[phone]);
 
-  const keepLastPerDay = arr => {
-    const byDay = {};
-    arr.forEach(e => {
-      const d = new Date(e.ts);
-      const key = d.getFullYear()+"-"+d.getMonth()+"-"+d.getDate();
-      if(!byDay[key] || e.ts>byDay[key].ts) byDay[key]=e;
-    });
-    return Object.values(byDay).sort((a,b)=>a.ts-b.ts);
-  };
-
   const sendSummary = () => {
     const shalomLastSent = shalom.lastSentTs||0;
     const zambaLastSent  = zamba.lastSentTs||0;
-    const shalomNew = keepLastPerDay((shalom.log||[]).filter(l=>l.ts>shalomLastSent));
-    const zambaNew  = keepLastPerDay((zamba.log||[]).filter(l=>l.ts>zambaLastSent));
+    const shalomNew = (shalom.log||[]).filter(l=>l.ts>shalomLastSent);
+    const zambaNew  = (zamba.log||[]).filter(l=>l.ts>zambaLastSent);
     const shalomNewSum = shalomNew.reduce((s,e)=>s+e.amount,0);
     const zambaNewSum  = zambaNew.reduce((s,e)=>s+e.amount,0);
     const newSum  = shalomNewSum+zambaNewSum;
