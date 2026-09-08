@@ -608,29 +608,29 @@ function PersonCard({ title, color, amount, person, data, selKey, sync }){
     const dt = chargeTime ? new Date(chargeTime) : new Date();
     const ts = dt.getTime();
     const newLog = [...log,{ts,amount}].sort((a,b)=>a.ts-b.ts);
-    sync(()=>fbSet(`melavim/engel/${person}`, {balance:balance+amount, log:newLog}));
+    sync(()=>fbSet(`melavim/engel/${person}`, {...d, balance:balance+amount, log:newLog}));
     setChargeTime(nowLocalInput());
   };
   const undoClick = () => {
     if(!log.length) return;
     const last=log[log.length-1];
     const newLog=log.slice(0,-1);
-    sync(()=>fbSet(`melavim/engel/${person}`, {balance:Math.max(0,balance-last.amount), log:newLog}));
+    sync(()=>fbSet(`melavim/engel/${person}`, {...d, balance:Math.max(0,balance-last.amount), log:newLog}));
   };
   const removeEntry = (i) => {
     const entry=log[i];
     const newLog=log.filter((_,idx)=>idx!==i);
-    sync(()=>fbSet(`melavim/engel/${person}`, {balance:Math.max(0,balance-entry.amount), log:newLog}));
+    sync(()=>fbSet(`melavim/engel/${person}`, {...d, balance:Math.max(0,balance-entry.amount), log:newLog}));
   };
   const handleToggleDay = ({ day, y, m, sameDay }) => {
     if (sameDay.length>0) {
       const removeAmount = sameDay.reduce((s,e)=>s+e.amount,0);
       const newLog = log.filter(l=>!sameDay.includes(l));
-      sync(()=>fbSet(`melavim/engel/${person}`, {balance:Math.max(0,balance-removeAmount), log:newLog}));
+      sync(()=>fbSet(`melavim/engel/${person}`, {...d, balance:Math.max(0,balance-removeAmount), log:newLog}));
     } else {
       const ts = new Date(y,m-1,day,12,0).getTime();
       const newLog = [...log,{ts,amount}].sort((a,b)=>a.ts-b.ts);
-      sync(()=>fbSet(`melavim/engel/${person}`, {balance:balance+amount, log:newLog}));
+      sync(()=>fbSet(`melavim/engel/${person}`, {...d, balance:balance+amount, log:newLog}));
     }
   };
 
