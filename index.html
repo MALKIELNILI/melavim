@@ -938,6 +938,21 @@ function YanivTab({ data, sync, phone, setPhone }){
   };
   const markVacation = (day) => setDay(day, { hours:0, note:"חופשה" });
 
+  // ── טווח תאריכים — החלה מהירה על כמה ימים ברצף (כמו לוח חופשות/חגים) ──
+  const [rangeFrom,setRangeFrom]=useState(1);
+  const [rangeTo,setRangeTo]=useState(1);
+  const [rangeHours,setRangeHours]=useState(0);
+  const [rangeNote,setRangeNote]=useState("חופשה");
+  const applyRange = () => {
+    const from = Math.max(1, Math.min(rangeFrom, rangeTo));
+    const to = Math.min(daysInMonth, Math.max(rangeFrom, rangeTo));
+    const updates = { ...overrides };
+    for(let d=from; d<=to; d++){
+      updates[d] = { hours:Number(rangeHours)||0, note:rangeNote };
+    }
+    sync(()=>fbSet(`melavim/attendance/${reportKey}/${selKey}/days`, updates));
+  };
+
   const dowLabel = (day) => {
     const dow = new Date(ky, km-1, day).getDay();
     return ["א","ב","ג","ד","ה","ו","ש"][dow];
@@ -987,6 +1002,24 @@ function YanivTab({ data, sync, phone, setPhone }){
         <div style={{fontSize:42,fontWeight:800}}>{fmt(totalHours)} שעות</div>
         <div style={{fontSize:12,opacity:.7,marginTop:4}}>{person.פרטי} {person.משפחה} · ת.ז {person.תז} · {person.פרויקט}</div>
         {lastSentTs>0 && <div style={{fontSize:11,opacity:.65,marginTop:6}}>✅ נשלח לאחרונה: {fmtDateTime(lastSentTs)}</div>}
+      </div>
+
+      <div style={card}>
+        <div style={{fontWeight:700,fontSize:14,marginBottom:10}}>🗓️ הזנה מהירה לטווח תאריכים</div>
+        <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:8}}>
+          <span style={{fontSize:12,color:"#64748b"}}>מיום</span>
+          <input type="number" min={1} max={daysInMonth} value={rangeFrom} onChange={e=>setRangeFrom(Number(e.target.value))} style={{...iinp,width:56,textAlign:"center"}} />
+          <span style={{fontSize:12,color:"#64748b"}}>עד יום</span>
+          <input type="number" min={1} max={daysInMonth} value={rangeTo} onChange={e=>setRangeTo(Number(e.target.value))} style={{...iinp,width:56,textAlign:"center"}} />
+        </div>
+        <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:8}}>
+          <span style={{fontSize:12,color:"#64748b"}}>שעות</span>
+          <input type="number" value={rangeHours} onChange={e=>setRangeHours(e.target.value)} style={{...iinp,width:56,textAlign:"center"}} />
+          <input type="text" placeholder="הערה (חופשה / קייטנה / וכו')" value={rangeNote} onChange={e=>setRangeNote(e.target.value)} style={{...iinp,flex:1,minWidth:0}} />
+        </div>
+        <button style={{...smallBtn,width:"100%",background:"#eff6ff",color:"#1d4ed8",border:"1px solid #bfdbfe",fontWeight:700}} onClick={applyRange}>
+          ✅ החל על כל הימים בטווח
+        </button>
       </div>
 
       <div style={card}>
