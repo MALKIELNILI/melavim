@@ -953,6 +953,41 @@ function YanivTab({ data, sync, phone, setPhone }){
     sync(()=>fbSet(`melavim/attendance/${reportKey}/${selKey}/days`, updates));
   };
 
+  // ── לוח חגים תשרי תשפ"ז — מילוי אוטומטי בלחיצה אחת (ספטמבר+אוקטובר 2026 יחד) ──
+  // לפי הלוח ממרכז חינוך "אור חדש": ימי חופש, צום גדליה, ימי לימוד בין יו"כ לסוכות, וקייטנה בחוה"מ
+  // (הקייטנה דורסת בכוונה חלק מטווח החופשה של סוכות — זה נכון, לא כפילות).
+  const buildTishreiDays = (baseOverrides, entries) => {
+    const result = {...baseOverrides};
+    entries.forEach(([from,to,hours,note])=>{
+      for(let d=from; d<=to; d++) result[d] = { hours, note };
+    });
+    return result;
+  };
+  const loadTishreiSchedule = () => {
+    if(!confirm('להזין אוטומטית את לוח חגי תשרי תשפ"ז (ספטמבר+אוקטובר 2026) לפי הלוח ממרכז "אור חדש"? זה ידרוס ימים חופפים בשני החודשים.')) return;
+    const sepKey = "2026-09", octKey = "2026-10";
+    const sepBase = ((data[reportKey]||{})[sepKey]||{}).days || {};
+    const octBase = ((data[reportKey]||{})[octKey]||{}).days || {};
+    const sepDays = buildTishreiDays(sepBase, [
+      [11,13,0,"חופשה - ערב וראש השנה"],
+      [14,14,6,"צום גדליה"],
+      [20,21,0,"חופשה - ערב ויום כיפור"],
+      [22,24,9.25,"לימודים כרגיל 07:30-16:45"],
+      [25,30,0,"חופשה - ערב וחג סוכות"],
+      [27,30,4,"קייטנה 09:00-13:00"],
+    ]);
+    const octDays = buildTishreiDays(octBase, [
+      [1,1,4,"קייטנה 09:00-13:00"],
+      [2,3,0,"חופשה - חג סוכות"],
+      [4,4,0,"אסרו חג"],
+    ]);
+    sync(()=>{
+      fbSet(`melavim/attendance/${reportKey}/${sepKey}/days`, sepDays);
+      fbSet(`melavim/attendance/${reportKey}/${octKey}/days`, octDays);
+    });
+    alert('✓ לוח חגי תשרי הוזן לספטמבר ואוקטובר 2026!');
+  };
+
   const dowLabel = (day) => {
     const dow = new Date(ky, km-1, day).getDay();
     return ["א","ב","ג","ד","ה","ו","ש"][dow];
@@ -1002,6 +1037,14 @@ function YanivTab({ data, sync, phone, setPhone }){
         <div style={{fontSize:42,fontWeight:800}}>{fmt(totalHours)} שעות</div>
         <div style={{fontSize:12,opacity:.7,marginTop:4}}>{person.פרטי} {person.משפחה} · ת.ז {person.תז} · {person.פרויקט}</div>
         {lastSentTs>0 && <div style={{fontSize:11,opacity:.65,marginTop:6}}>✅ נשלח לאחרונה: {fmtDateTime(lastSentTs)}</div>}
+      </div>
+
+      <div style={card}>
+        <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>🎉 לוח חגי תשרי תשפ"ז</div>
+        <div style={{fontSize:11,color:"#94a3b8",marginBottom:8}}>ממלא אוטומטית את ספטמבר+אוקטובר 2026 לפי הלוח ממרכז חינוך "אור חדש" (חופשות, צום גדליה, ימי לימוד, קייטנה)</div>
+        <button style={{...smallBtn,width:"100%",background:"#f5f3ff",color:"#7c3aed",border:"1px solid #ddd6fe",fontWeight:700}} onClick={loadTishreiSchedule}>
+          ✨ מלא אוטומטית
+        </button>
       </div>
 
       <div style={card}>
