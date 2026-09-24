@@ -80,17 +80,19 @@ const REPORTS = {
   zamba:    { label:"זמבא",  משפחה:"יצחקוב", פרטי:"מלכיאל", תז:"303636153", סמל:"275", פרויקט:"בני ברק", מוסד:"זמבא", קו:"" },
 };
 
-// יום ברירת מחדל: 6 שעות, חוץ משבת = 0. שישי מסומן בהערה אבל עדיין 6 שעות.
-function defaultDayInfo(y, m, day) {
+// יום ברירת מחדל: 6 שעות, חוץ משבת = 0. אצל זמבא גם שישי = 0 (אין עבודה בשישי).
+function defaultDayInfo(y, m, day, reportKey) {
   const dow = new Date(y, m-1, day).getDay(); // 0=ראשון...6=שבת
   const isSat = dow === 6, isFri = dow === 5;
-  return { note: isFri ? "שישי" : isSat ? "שבת" : "", hours: isSat ? 0 : 6 };
+  const noFriWork = reportKey === "zamba";
+  const hours = isSat ? 0 : (isFri && noFriWork) ? 0 : 6;
+  return { note: isFri ? "שישי" : isSat ? "שבת" : "", hours };
 }
-function buildDaysArr(y, m, overrides) {
+function buildDaysArr(y, m, overrides, reportKey) {
   const daysInMonth = new Date(y, m, 0).getDate();
   const arr = {};
   for (let d=1; d<=daysInMonth; d++) {
-    const def = defaultDayInfo(y, m, d);
+    const def = defaultDayInfo(y, m, d, reportKey);
     const ov = (overrides||{})[d];
     arr[d] = {
       dateStr: `${pad2(d)}/${pad2(m)}/${y}`,
@@ -925,7 +927,7 @@ function YanivTab({ data, sync, phone, setPhone }){
   const reportData = (data[reportKey]||{})[selKey] || {};
   const overrides = reportData.days || {};
   const lastSentTs = reportData.lastSentTs || 0;
-  const { arr: daysArr, daysInMonth } = buildDaysArr(ky, km, overrides);
+  const { arr: daysArr, daysInMonth } = buildDaysArr(ky, km, overrides, reportKey);
   const totalHours = Object.values(daysArr).reduce((s,d)=>s+Number(d.hours||0),0);
 
   const setDay = (day, patch) => {
