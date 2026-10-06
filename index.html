@@ -58,7 +58,14 @@ const now = new Date();
 const mkMonthKey = (y,m) => `${y}-${String(m+1).padStart(2,'0')}`;
 const mkMonthLabel = (y,m) => `${MONTHS_HE[m]} ${y}`;
 const labelFromKey = k => { const [y,m]=k.split("-").map(Number); return mkMonthLabel(y,m-1); };
-const fmtDateTime = ts => new Date(ts).toLocaleString("he-IL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+const fmtDateWithTime = ts => {
+  const d = new Date(ts);
+  const day = String(d.getDate()).padStart(2,'0');
+  const month = String(d.getMonth()+1).padStart(2,'0');
+  const hour = String(d.getHours()).padStart(2,'0');
+  const min = String(d.getMinutes()).padStart(2,'0');
+  return `${day}/${month} ${hour}:${min}`;
+};
 const nowLocalInput = () => {
   const d = new Date();
   const pad = n => String(n).padStart(2,'0');
@@ -437,7 +444,7 @@ function ShmulikTab({ data, sync, phone, setPhone }){
               const idx=log.length-1-i;
               return (
                 <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:"#64748b",padding:"4px 0",borderBottom:"1px solid #f1f5f9"}}>
-                  <span>{fmtDateTime(l.ts)}{l.type?` · ${SHMULIK_TYPES[l.type].icon} ${SHMULIK_TYPES[l.type].label}`:""}</span>
+                  <span>{fmtDateWithTime(l.ts)}{l.type?` · ${SHMULIK_TYPES[l.type].icon} ${SHMULIK_TYPES[l.type].label}`:""}</span>
                   <span style={{display:"flex",alignItems:"center",gap:6}}>
                     <span>20 ₪</span>
                     <button style={delBtn} onClick={()=>removeEntry(idx)}>✕</button>
@@ -573,7 +580,7 @@ function ShmulikPaymentsSection({ data, selKey, selLabel, sync, total, remaining
             const key = String(p.ts);
             return (
               <div key={key} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 0",borderBottom:"1px solid #f1f5f9",fontSize:12}}>
-                <span style={{color:"#64748b",flex:1}}>{fmtDateTime(p.ts)}</span>
+                <span style={{color:"#64748b",flex:1}}>{fmtDateWithTime(p.ts)}</span>
                 {editKey===key ? (
                   <>
                     <input style={{...iinp,width:80,fontSize:12,padding:"2px 4px"}} type="number" value={editAmt} onChange={e=>setEditAmt(e.target.value)} autoFocus />
@@ -658,7 +665,7 @@ function PersonCard({ title, color, amount, person, data, selKey, sync }){
             const idx=log.length-1-i;
             return (
               <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"2px 0",borderBottom:"1px solid #f1f5f9"}}>
-                <span>{fmtDateTime(l.ts)}</span>
+                <span>{fmtDateWithTime(l.ts)}</span>
                 <span style={{display:"flex",alignItems:"center",gap:6}}>
                   <span>+{fmt(l.amount)} ₪</span>
                   <button style={delBtn} onClick={()=>removeEntry(idx)}>✕</button>
@@ -755,7 +762,7 @@ function EngelPaymentsSection({ data, sync }){
             const key = String(p.ts);
             return (
               <div key={key} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 0",borderBottom:"1px solid #f1f5f9",fontSize:12}}>
-                <span style={{color:"#64748b",flex:1}}>{fmtDateTime(p.ts)}</span>
+                <span style={{color:"#64748b",flex:1}}>{fmtDateWithTime(p.ts)}</span>
                 {editKey===key ? (
                   <>
                     <input style={{...iinp,width:80,fontSize:12,padding:"2px 4px"}} type="number" value={editAmt} onChange={e=>setEditAmt(e.target.value)} autoFocus />
@@ -1038,7 +1045,7 @@ function YanivTab({ data, sync, phone, setPhone }){
         <div style={{fontSize:13,opacity:.75,marginBottom:4}}>{person.label} — {selLabel}</div>
         <div style={{fontSize:42,fontWeight:800}}>{fmt(totalHours)} שעות</div>
         <div style={{fontSize:12,opacity:.7,marginTop:4}}>{person.פרטי} {person.משפחה} · ת.ז {person.תז} · {person.פרויקט}</div>
-        {lastSentTs>0 && <div style={{fontSize:11,opacity:.65,marginTop:6}}>✅ נשלח לאחרונה: {fmtDateTime(lastSentTs)}</div>}
+        {lastSentTs>0 && <div style={{fontSize:11,opacity:.65,marginTop:6}}>✅ נשלח לאחרונה: {fmtDateWithTime(lastSentTs)}</div>}
       </div>
 
       <div style={card}>
