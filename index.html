@@ -628,7 +628,9 @@ function PersonCard({ title, color, amount, person, data, selKey, sync }){
   const addCharge = () => {
     const dt = chargeTime ? new Date(chargeTime) : new Date();
     const ts = dt.getTime();
-    const newLog = [...log,{ts,amount}].sort((a,b)=>a.ts-b.ts);
+    const hour = dt.getHours();
+    const timeLabel = hour < 12 ? "בוקר" : hour < 18 ? "אחר הצהריים" : "ערב";
+    const newLog = [...log,{ts,amount,timeLabel}].sort((a,b)=>a.ts-b.ts);
     sync(()=>fbSet(`melavim/engel/${person}`, {...d, balance:balance+amount, log:newLog}));
     setChargeTime(nowLocalInput());
   };
@@ -650,7 +652,8 @@ function PersonCard({ title, color, amount, person, data, selKey, sync }){
       sync(()=>fbSet(`melavim/engel/${person}`, {...d, balance:Math.max(0,balance-removeAmount), log:newLog}));
     } else {
       const ts = new Date(y,m-1,day,12,0).getTime();
-      const newLog = [...log,{ts,amount}].sort((a,b)=>a.ts-b.ts);
+      const timeLabel = "בוקר";
+      const newLog = [...log,{ts,amount,timeLabel}].sort((a,b)=>a.ts-b.ts);
       sync(()=>fbSet(`melavim/engel/${person}`, {...d, balance:balance+amount, log:newLog}));
     }
   };
@@ -677,7 +680,7 @@ function PersonCard({ title, color, amount, person, data, selKey, sync }){
             const idx=log.length-1-i;
             return (
               <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"2px 0",borderBottom:"1px solid #f1f5f9"}}>
-                <span>{fmtDateWithTime(l.ts)}</span>
+                <span>{fmtDateWithTime(l.ts)}{l.timeLabel ? ` · ${l.timeLabel}` : ""}</span>
                 <span style={{display:"flex",alignItems:"center",gap:6}}>
                   <span>+{fmt(l.amount)} ₪</span>
                   <button style={delBtn} onClick={()=>removeEntry(idx)}>✕</button>
@@ -901,7 +904,7 @@ function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
       ...angelNew.map(l=>({...l,who:"אנגל"})),
     ].sort((a,b)=>a.ts-b.ts);
     let body = entries.length
-      ? entries.map(l=>`${fmtDateShort(l.ts)} - ${l.who} - ${fmt(l.amount)} ₪`).join("\n")
+      ? entries.map(l=>`${fmtDateShort(l.ts)} ${l.timeLabel ? "· " + l.timeLabel : ""} - ${l.who} - ${fmt(l.amount)} ₪`).join("\n")
       : "(אין נסיעות חדשות מהשליחה הקודמת)";
     body += `\n\nנוכחי: ${fmt(newSum)} ₪`;
     if(prevAmount>0) body += `\nקודם (לא שולם): ${fmt(prevAmount)} ₪`;
