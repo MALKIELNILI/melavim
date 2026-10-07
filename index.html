@@ -885,16 +885,20 @@ function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
   const sendSummary = () => {
     const shalomLastSent = shalom.lastSentTs||0;
     const zambaLastSent  = zamba.lastSentTs||0;
+    const angelLastSent  = angel.lastSentTs||0;
     const shalomNew = (shalom.log||[]).filter(l=>l.ts>shalomLastSent);
     const zambaNew  = (zamba.log||[]).filter(l=>l.ts>zambaLastSent);
+    const angelNew  = (angel.log||[]).filter(l=>l.ts>angelLastSent);
     const shalomNewSum = shalomNew.reduce((s,e)=>s+e.amount,0);
     const zambaNewSum  = zambaNew.reduce((s,e)=>s+e.amount,0);
-    const newSum  = shalomNewSum+zambaNewSum;
-    const prevAmount = Math.max(0,(shalom.balance||0)-shalomNewSum) + Math.max(0,(zamba.balance||0)-zambaNewSum);
+    const angelNewSum  = angelNew.reduce((s,e)=>s+e.amount,0);
+    const newSum  = shalomNewSum+zambaNewSum+angelNewSum;
+    const prevAmount = Math.max(0,(shalom.balance||0)-shalomNewSum) + Math.max(0,(zamba.balance||0)-zambaNewSum) + Math.max(0,(angel.balance||0)-angelNewSum);
 
     const entries = [
       ...shalomNew.map(l=>({...l,who:"שלום"})),
       ...zambaNew.map(l=>({...l,who:"זמבא"})),
+      ...angelNew.map(l=>({...l,who:"אנגל"})),
     ].sort((a,b)=>a.ts-b.ts);
     let body = entries.length
       ? entries.map(l=>`${fmtDateShort(l.ts)} - ${l.who} - ${fmt(l.amount)} ₪`).join("\n")
@@ -905,7 +909,7 @@ function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
     const text = `שלום אנגל! 👋\nסיכום נסיעות:\n\n${body}\n\n💰 סה״כ לתשלום: ${fmt(combined)} ₪ 🙏`;
     window.open(waLink(phoneInput,text),"_blank");
     const sentNow = Date.now();
-    sync(()=>{ fbSet(`melavim/engel/shalom/lastSentTs`, sentNow); fbSet(`melavim/engel/zamba/lastSentTs`, sentNow); });
+    sync(()=>{ fbSet(`melavim/engel/shalom/lastSentTs`, sentNow); fbSet(`melavim/engel/zamba/lastSentTs`, sentNow); fbSet(`melavim/engel/angel/lastSentTs`, sentNow); });
   };
 
   return (
