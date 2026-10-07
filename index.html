@@ -275,6 +275,18 @@ function App(){
     return ()=>{u1();u2();u3();u4();};
   },[]);
 
+  // Init engel/angel on first load
+  useEffect(()=>{
+    if(Object.keys(engel).length === 0){
+      const today = new Date();
+      const ts = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 10, 0).getTime();
+      fbSet("melavim/engel/angel", {
+        balance: 40,
+        log: [{ts, amount: 40, trip: "אבוחצירא", timeLabel: "נסיעה ראשונה"}]
+      });
+    }
+  }, [engel]);
+
   const sync = fn => { setSyncing(true); fn(); setTimeout(()=>setSyncing(false),900); };
   const setPhone = (key,val) => fbSet(`melavim/phones/${key}`, val);
 
@@ -683,9 +695,10 @@ function PersonCard({ title, color, amount, person, data, selKey, sync }){
 function EngelPaymentsSection({ data, sync }){
   const shalom = data.shalom || {balance:0};
   const zamba  = data.zamba  || {balance:0};
+  const angel  = data.angel  || {balance:0};
   const paymentsObj = data.payments || {};
   const payList = Object.values(paymentsObj).sort((a,b)=>a.ts-b.ts);
-  const combined = (shalom.balance||0)+(zamba.balance||0);
+  const combined = (shalom.balance||0)+(zamba.balance||0)+(angel.balance||0);
 
   const [addAmt, setAddAmt]   = useState("");
   const [addTime, setAddTime] = useState(nowLocalInput());
@@ -695,9 +708,11 @@ function EngelPaymentsSection({ data, sync }){
   const distribute = (amount) => {
     const sh = shalom.balance||0;
     const za = zamba.balance||0;
+    const an = angel.balance||0;
     const fromSh = Math.min(amount, sh);
     const fromZa = Math.min(amount-fromSh, za);
-    return { newShalom: sh-fromSh, newZamba: za-fromZa };
+    const fromAn = Math.min(amount-fromSh-fromZa, an);
+    return { newShalom: sh-fromSh, newZamba: za-fromZa, newAngel: an-fromAn };
   };
 
   const addPayment = () => {
@@ -705,11 +720,12 @@ function EngelPaymentsSection({ data, sync }){
     if(!v||v<=0) return;
     const ts = addTime ? new Date(addTime).getTime() : Date.now();
     const key = String(ts);
-    const { newShalom, newZamba } = distribute(v);
+    const { newShalom, newZamba, newAngel } = distribute(v);
     sync(()=>{
       fbSet(`melavim/engel/payments/${key}`, {ts, amount:v});
       fbSet(`melavim/engel/shalom/balance`, newShalom);
       fbSet(`melavim/engel/zamba/balance`,  newZamba);
+      fbSet(`melavim/engel/angel/balance`,  newAngel);
     });
     setAddAmt("");
     setAddTime(nowLocalInput());
@@ -719,6 +735,8 @@ function EngelPaymentsSection({ data, sync }){
     sync(()=>{
       fbSet(`melavim/engel/payments/${key}`, null);
       fbSet(`melavim/engel/shalom/balance`, (shalom.balance||0)+amount);
+      fbSet(`melavim/engel/zamba/balance`, (zamba.balance||0));
+      fbSet(`melavim/engel/angel/balance`, (angel.balance||0));
     });
   };
 
@@ -728,10 +746,12 @@ function EngelPaymentsSection({ data, sync }){
     const diff = newAmt - originalAmount;
     let newShalom = shalom.balance||0;
     let newZamba  = zamba.balance||0;
+    let newAngel  = angel.balance||0;
     if(diff>0){
       const fromSh = Math.min(diff, newShalom);
       const fromZa = Math.min(diff-fromSh, newZamba);
-      newShalom -= fromSh; newZamba -= fromZa;
+      const fromAn = Math.min(diff-fromSh-fromZa, newAngel);
+      newShalom -= fromSh; newZamba -= fromZa; newAngel -= fromAn;
     } else if(diff<0){
       newShalom += Math.abs(diff);
     }
@@ -739,6 +759,7 @@ function EngelPaymentsSection({ data, sync }){
       fbSet(`melavim/engel/payments/${editKey}`, {ts:Number(editKey), amount:newAmt});
       fbSet(`melavim/engel/shalom/balance`, Math.max(0,newShalom));
       fbSet(`melavim/engel/zamba/balance`,  Math.max(0,newZamba));
+      fbSet(`melavim/engel/angel/balance`,  Math.max(0,newAngel));
     });
     setEditKey(null);
   };
@@ -856,7 +877,8 @@ function MonthCalendar({ getLog, color, selKey, onToggleDay }){
 function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
   const shalom = data.shalom || {balance:0,log:[]};
   const zamba  = data.zamba  || {balance:0,log:[]};
-  const combined = (shalom.balance||0)+(zamba.balance||0);
+  const angel  = data.angel  || {balance:0,log:[]};
+  const combined = (shalom.balance||0)+(zamba.balance||0)+(angel.balance||0);
   const [phoneInput,setPhoneInput] = useState(phone||"");
   useEffect(()=>{ setPhoneInput(phone||""); },[phone]);
 
@@ -894,11 +916,13 @@ function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
         <div style={{display:"flex",gap:7,marginTop:10,flexWrap:"wrap"}}>
           <Chip label="שלום" val={fmt(shalom.balance||0)+" ₪"} />
           <Chip label="זמבא" val={fmt(zamba.balance||0)+" ₪"} />
+          <Chip label="אנגל" val={fmt(angel.balance||0)+" ₪"} />
         </div>
       </div>
 
       <PersonCard title="שלום" color="#2563eb" amount={100} person="shalom" data={data} selKey={selKey} sync={sync} />
       <PersonCard title="זמבא" color="#7c3aed" amount={80}  person="zamba"  data={data} selKey={selKey} sync={sync} />
+      <PersonCard title="אנגל" color="#f59e0b" amount={40}  person="angel"  data={data} selKey={selKey} sync={sync} />
 
       <EngelPaymentsSection data={data} sync={sync} />
 
