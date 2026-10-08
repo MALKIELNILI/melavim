@@ -889,7 +889,7 @@ function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
     const entries = [
       ...shalomNew.map(l=>({...l,who:"שלום"})),
       ...zambaNew.map(l=>({...l,who:"זמבא"})),
-      ...angelNew.map(l=>({...l,who:"אנגל"})),
+      ...angelNew.map(l=>({...l,who:"אבוחצירא"})),
     ].sort((a,b)=>a.ts-b.ts);
     let body = entries.length
       ? entries.map(l=>`${fmtDateShort(l.ts)} ${l.timeLabel ? "· " + l.timeLabel : ""} - ${l.who} - ${fmt(l.amount)} ₪`).join("\n")
