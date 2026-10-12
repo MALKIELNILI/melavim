@@ -900,7 +900,11 @@ function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
     const text = `שלום אנגל! 👋\nסיכום נסיעות:\n\n${body}\n\n💰 סה״כ לתשלום: ${fmt(combined)} ₪ 🙏`;
     window.open(waLink(phoneInput,text),"_blank");
     const sentNow = Date.now();
-    sync(()=>{ fbSet(`melavim/engel/shalom/lastSentTs`, sentNow); fbSet(`melavim/engel/zamba/lastSentTs`, sentNow); fbSet(`melavim/engel/angel/lastSentTs`, sentNow); });
+    sync(()=>{
+      if(shalomNew.length > 0) fbSet(`melavim/engel/shalom/lastSentTs`, sentNow);
+      if(zambaNew.length > 0) fbSet(`melavim/engel/zamba/lastSentTs`, sentNow);
+      if(angelNew.length > 0) fbSet(`melavim/engel/angel/lastSentTs`, sentNow);
+    });
   };
 
   return (
