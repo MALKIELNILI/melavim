@@ -1035,7 +1035,7 @@ function YanivTab({ data, sync, phone, setPhone }){
       if (status === "shared") setSendMsg("✅ שותף בהצלחה");
       else if (status === "downloaded") setSendMsg("📥 הקובץ ירד למכשיר — שיתוף ישיר לוואטסאפ לא נתמך בדפדפן זה. אפשר לפתוח את ההורדות ולשתף משם ידנית.");
       if (status !== "cancelled") {
-        sync(()=>fbSet(`melavim/attendance/${reportKey}/${selKey}/lastSentTs`, Date.now()));
+        sync(()=>fbSet(`melavim/attendance/${reportKey}/${selKey}`, {...reportData, lastSentTs: Date.now()}));
       }
     } catch(e) {
       console.error("[מלווים] הפקת הקובץ נכשלה:", e);
