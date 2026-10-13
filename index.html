@@ -901,9 +901,9 @@ function EngelTab({ data, selKey, selLabel, sync, phone, setPhone }){
     window.open(waLink(phoneInput,text),"_blank");
     const sentNow = Date.now();
     sync(()=>{
-      if(shalomNew.length > 0) fbSet(`melavim/engel/shalom/lastSentTs`, sentNow);
-      if(zambaNew.length > 0) fbSet(`melavim/engel/zamba/lastSentTs`, sentNow);
-      if(angelNew.length > 0) fbSet(`melavim/engel/angel/lastSentTs`, sentNow);
+      if(shalomNew.length > 0) fbSet(`melavim/engel/shalom`, {...shalom, lastSentTs: sentNow});
+      if(zambaNew.length > 0) fbSet(`melavim/engel/zamba`, {...zamba, lastSentTs: sentNow});
+      if(angelNew.length > 0) fbSet(`melavim/engel/angel`, {...angel, lastSentTs: sentNow});
     });
   };
 
