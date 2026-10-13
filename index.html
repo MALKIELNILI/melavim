@@ -391,7 +391,7 @@ function ShmulikTab({ data, sync, phone, setPhone }){
     if(prevAmount>0) body += `\nקודם (לא שולם): ${fmt(prevAmount)} ₪`;
     const text = `שלום שמוליק! 👋\nסיכום ${selLabel}:\n\n${body}\n\n💰 סה״כ: ${fmt(total)} ₪ 🙏`;
     window.open(waLink(phoneInput,text),"_blank");
-    sync(()=>fbSet(`melavim/shmulik/months/${selKey}/lastSentTs`, Date.now()));
+    sync(()=>fbSet(`melavim/shmulik/months/${selKey}`, {...cur, lastSentTs: Date.now()}));
   };
   const undoClick = () => {
     if(!log.length) return;
